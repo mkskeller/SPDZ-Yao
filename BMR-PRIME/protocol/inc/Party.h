@@ -16,6 +16,7 @@
 #define SERVER_ID (0)
 #define INPUT_KEYS_MSG_TYPE_SIZE (16) // so memory will by alligned
 
+
 typedef struct {
 	unsigned long min=0;
 	unsigned long long acc=0;

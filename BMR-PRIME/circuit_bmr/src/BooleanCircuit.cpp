@@ -255,10 +255,18 @@ BooleanCircuit::BooleanCircuit(const char* desc_file)
 
 void BooleanCircuit::EvaluateByLayerLinearly(party_id_t my_id) {
 	char* prf_output = new char[PAD_TO_8(_num_parties)*16];
+#ifdef __PURE_SHE__
+	mpz_t temp_mpz;
+	init_temp_mpz_t(temp_mpz);
+#endif
 	for(int i=0; i<_layers.size(); i++) {
 		for (int j=0; j<_layers[i].size(); j++) {
 			gate_id_t gid = _layers[i][j];
+#ifdef __PURE_SHE__
+			signal_t s = _eval_gate(gid, my_id, prf_output, temp_mpz);
+#else
 			signal_t s = _eval_gate(gid, my_id, prf_output);
+#endif
 //			printf("%d ", s);
 			_externals[_gates[gid]._out] = s;
 		}
@@ -279,6 +287,10 @@ void BooleanCircuit::EvaluateByLayer(int num_threads, party_id_t my_id)
 void BooleanCircuit::_eval_by_layer(int i, int num_threads, party_id_t my_id)
 {
 	char* prf_output = new char[PAD_TO_8(_num_parties)*16];
+#ifdef __PURE_SHE__
+	mpz_t temp_mpz;
+	init_temp_mpz_t(temp_mpz);
+#endif
 	for(int l=0; l<_layers.size(); l++) {
 		int layer_sz = _layers[l].size();
 		int start_idx = (layer_sz/num_threads)*i;
@@ -288,7 +300,11 @@ void BooleanCircuit::_eval_by_layer(int i, int num_threads, party_id_t my_id)
 //		printf("thread %d eval layer %d indices %d - %d\n", i, l, start_idx, end_idx);
 		for(int g=start_idx; g<=end_idx; g++) {
 			gate_id_t gid = _layers[l][g];
+#ifdef __PURE_SHE__
+			signal_t s = _eval_gate(gid, my_id, prf_output, temp_mpz);
+#else
 			signal_t s = _eval_gate(gid, my_id, prf_output);
+#endif
 			_externals[_gates[gid]._out] = s;
 		}
 //		printf("done eval layer %d\n", l);
@@ -358,7 +374,11 @@ void BooleanCircuit::_eval_by_layer(int i, int num_threads, party_id_t my_id)
 //	}
 //}
 
+#ifdef __PURE_SHE__
+signal_t BooleanCircuit::_eval_gate(gate_id_t g, party_id_t my_id, char* prf_output, mpz_t& tmp_mpz)
+#else
 signal_t BooleanCircuit::_eval_gate(gate_id_t g, party_id_t my_id, char* prf_output)
+#endif
 {
 //	std::cout << std::endl << "evaluate gate " << g << std::endl;
 	wire_id_t w_l = _gates[g]._left;
@@ -398,6 +418,12 @@ signal_t BooleanCircuit::_eval_gate(gate_id_t g, party_id_t my_id, char* prf_out
 			garbled_entry[j-1] -= k;
 		}
 	}
+
+#if __PURE_SHE__
+	for(party_id_t j=1; j<=_num_parties; j++) {
+		garbled_entry[j-1].sqr_in_place(tmp_mpz);
+	}
+#endif
 
 //	for(party_id_t i=1; i<=_num_parties; i++) {
 //		std::cout << garbled_entry[i-1] << "  ";

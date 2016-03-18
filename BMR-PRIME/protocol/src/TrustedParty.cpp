@@ -29,6 +29,11 @@ TrustedParty::TrustedParty(const char* netmap_file, // required to init Node
 	_N = _circuit->NumParties();
 	_W = _circuit->NumWires();
 	_OW = _circuit->NumOutWires();
+#ifdef __PURE_SHE__
+	init_modulos();
+	init_temp_mpz_t(_temp_mpz);
+	std::cout << "_temp_mpz: " << _temp_mpz << std::endl;
+#endif
 	_allocate_prf_outputs();
 	_allocate_garbled_table();
 	_num_prf_received = 0;
@@ -39,6 +44,8 @@ TrustedParty::TrustedParty(const char* netmap_file, // required to init Node
 		_node = new Node( netmap_file, 0, this );
 	}
 }
+
+
 
 TrustedParty::~TrustedParty() {
 	// TODO Auto-generated destructor stub
@@ -57,18 +64,27 @@ void TrustedParty::NodeReady()
 
 	Key* all_keys = new Key[number_of_keys];
 	memset(all_keys, 0, size_of_keys);
+#ifdef __PURE_SHE__
+	_circuit->_sqr_keys = new Key[number_of_keys];
+	memset(_circuit->_sqr_keys, 0, size_of_keys);
+#endif
+
 	for(party_id_t pid=1; pid<=_N; pid++)
 	{
 		/* generating and sending keys */
 		char* msg_keys = new char[msg_keys_size];
 		memset(msg_keys, 0, msg_keys_size);
-//						printf("keys for party %u\n", pid);
-//						phex(msg_keys + sizeof(MSG_TYPE), size_of_keys);
 		fill_message_type(msg_keys, TYPE_KEYS);
-		_fill_keys_for_party((Key*)(msg_keys + MSG_KEYS_HEADER_SZ), pid);
+		Key* party_keys = (Key*)(msg_keys + MSG_KEYS_HEADER_SZ);
+#ifdef __PURE_SHE__
+		_fill_keys_for_party(_circuit->_sqr_keys, party_keys, pid);
+#else
+		_fill_keys_for_party(party_keys, pid);
+#endif
 //						printf("keys for party %u\n", pid);
-//						phex(msg_keys + sizeof(MSG_TYPE), size_of_keys);
-		_merge_keys(all_keys, (Key*)(msg_keys + MSG_KEYS_HEADER_SZ));
+//						phex(party_keys, size_of_keys);
+
+		_merge_keys(all_keys, party_keys);
 
 //				printf("all keys\n");
 //				phex(all_keys, size_of_keys);
@@ -85,10 +101,6 @@ void TrustedParty::NodeReady()
 //				phex(msg_input_masks + sizeof(MSG_TYPE) , party.n_wires);
 	}
 
-#ifdef __PRIME_FIELD__ //converting all keys to be from the prime field
-	for(int i=0; i<number_of_keys; i++)
-		all_keys[i].adjust();
-#endif
 	_circuit->Keys(all_keys);
 
 	/* output wires' masks are the same for all players */
@@ -252,7 +264,11 @@ void TrustedParty::_compute_send_garbled_circuit()
 //		printf("xa=%d, xb=%d, xc=%d, xd=%d\n", xa,xb,xc,xd);
 
 		// these are the 0-keys
+#ifdef __PURE_SHE__
+		Key* outwire_start = _circuit->_sqr_keys + gate->_out*2*_N;
+#else
 		Key* outwire_start = _circuit->_keys + gate->_out*2*_N;
+#endif
 		Key* keyxa = outwire_start + (xa?_N:0);
 		Key* keyxb = outwire_start + (xb?_N:0);
 		Key* keyxc = outwire_start + (xc?_N:0);
@@ -289,10 +305,35 @@ void TrustedParty::_fill_keys_for_party(Key* keys, party_id_t pid)
 	for (wire_id_t w=0; w<_W; w++) {
 		read(nullfd, (char*)(keys+pid-1), sizeof(Key));
 		read(nullfd, (char*)(keys+_N+pid-1), sizeof(Key));
+#ifdef __PRIME_FIELD__
+		keys[pid-1].adjust();
+		keys[pid+_N-1].adjust();
+#endif
 		keys = keys + 2*_N;
 	}
 	close(nullfd);
 }
+
+#ifdef __PURE_SHE__
+void TrustedParty::_fill_keys_for_party(Key* sqr_keys, Key* keys, party_id_t pid)
+{
+	int nullfd = open("/dev/urandom", O_RDONLY);
+
+	for (wire_id_t w=0; w<_W; w++) {
+		read(nullfd, (char*)(sqr_keys+pid-1), sizeof(Key));
+		read(nullfd, (char*)(sqr_keys+_N+pid-1), sizeof(Key));
+#ifdef __PRIME_FIELD__
+		sqr_keys[pid-1].adjust();
+		sqr_keys[pid+_N-1].adjust();
+#endif
+		keys[pid-1] = sqr_keys[pid-1].sqr(_temp_mpz);
+		keys[pid+_N-1] = sqr_keys[pid+_N-1].sqr(_temp_mpz);
+		sqr_keys = sqr_keys + 2*_N;
+		keys = keys + 2*_N;
+	}
+	close(nullfd);
+}
+#endif
 
 /* Merge the two Key buffers into the dest buffer */
 void TrustedParty::_merge_keys(Key* dest, Key* src)

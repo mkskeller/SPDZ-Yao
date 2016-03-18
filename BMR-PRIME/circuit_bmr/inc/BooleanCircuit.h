@@ -110,8 +110,11 @@ private:
 
 	void _parse_circuit(const char* desc_file);
 	void _eval_thread(party_id_t my_id);
-//	/*virtual*/ signal_t _eval_gate(gate_id_t g, party_id_t my_id);
-	/*virtual*/ signal_t _eval_gate(gate_id_t g, party_id_t my_id, char* prf_output);
+#ifdef __PURE_SHE__
+	signal_t _eval_gate(gate_id_t g, party_id_t my_id, char* prf_output, mpz_t& tmp_mpz);
+#else
+	signal_t _eval_gate(gate_id_t g, party_id_t my_id, char* prf_output);
+#endif
 
 	inline bool is_wire_ready(wire_id_t w) {
 		return _externals[w] != NO_SIGNAL;
@@ -132,6 +135,11 @@ private:
 	 	 	 	 * 	for pipelining matters.
 	 	 	 	 */
 	inline Key* _key(party_id_t i, wire_id_t w,int b) {return _keys+ w*2*_num_parties + b*_num_parties + i-1 ; }
+
+#ifdef __PURE_SHE__
+	Key* _sqr_keys;
+	inline Key* _sqr_key(party_id_t i, wire_id_t w,int b) {return _sqr_keys+ w*2*_num_parties + b*_num_parties + i-1 ; }
+#endif
 
 	char* _masks; /* There are W masks, one per wire.  beginning with 0 */
 	char* _externals; /* Same as _masks */

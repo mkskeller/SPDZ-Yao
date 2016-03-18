@@ -19,6 +19,10 @@
 #include "msg_types.h"
 #include "prf.h"
 
+#ifdef __PURE_SHE__
+#include "mpirxx.h"
+#endif
+
 Party::Party(const char* netmap_file, // required to init Node
 		   const char* circuit_file, // required to init BooleanCircuit
 		   party_id_t id,
@@ -37,6 +41,9 @@ Party::Party(const char* netmap_file, // required to init Node
 	_OW = _circuit->NumOutWires();
 	_IO = _circuit->_num_input_wires;
 	_circuit->_masks = new char[_W];
+#ifdef __PURE_SHE__
+	init_modulos();
+#endif
 	_initialize_input();
 	_generate_prf_inputs();
 	_allocate_prf_outputs();
@@ -134,8 +141,8 @@ void Party::NewMessage(int from, char* message, unsigned int len)
 		memcpy(_circuit->_garbled_tbl, message+sizeof(MSG_TYPE), garbled_tbl_sz);
 		memcpy(_circuit->_garbled_tbl_copy, message+sizeof(MSG_TYPE), garbled_tbl_sz);
 
-//		printf("\nGarbled Table\n\n");
-//		_printf_garbled_table();
+//				printf("\nGarbled Table\n\n");
+//				_printf_garbled_table();
 		char garbled_circuit_cs = cs((char*)_circuit->_garbled_tbl , garbled_tbl_sz);
 		printf ("\ngarbled_circuit_cs = %d\n", garbled_circuit_cs);
 
@@ -145,30 +152,6 @@ void Party::NewMessage(int from, char* message, unsigned int len)
 
 		break;
 	}
-//	case TYPE_EXTERNAL_VALUES:
-//	{
-////		printf("TYPE_EXTERNAL_VALUES\n");
-//		_process_external_received(message+sizeof(MSG_TYPE), from);
-//
-//		int num_received;
-//		{
-//			std::unique_lock<std::mutex> locker(_process_externals_mx);
-//			num_received = ++_num_externals_msg_received;
-//		}
-//			if(num_received == _N-1)
-//			{
-//				_wait_for_all_externals.unlock();
-//				fill_message_type(_input_wire_keys_msg, TYPE_KEY_PER_IN_WIRE);
-//				_node->Broadcast2(_input_wire_keys_msg, _input_wire_keys_msg_sz);
-////							phex(_circuit->_externals, _IO);
-////							_print_keys_of_party((Key*)(_input_wire_keys_msg+INPUT_KEYS_MSG_TYPE_SIZE), _id);
-////							phex(_input_wire_keys_msg, _input_wire_keys_msg_sz);
-//				_check_evaluate();
-//			}
-////		}
-//
-//		break;
-//	}
 	case TYPE_EXTERNAL_VALUES:
 	{
 		//this is done by party 1 only
@@ -199,30 +182,6 @@ void Party::NewMessage(int from, char* message, unsigned int len)
 		_node->Send(1, _input_wire_keys_msg, _input_wire_keys_msg_sz);
 		break;
 	}
-//	case TYPE_KEY_PER_IN_WIRE:
-//	{
-////		printf("TYPE_KEY_PER_IN_WIRE\n");
-//		_wait_for_all_externals.lock();
-//		_wait_for_all_externals.unlock();
-//		_process_input_keys(message+INPUT_KEYS_MSG_TYPE_SIZE, from);
-//
-//		int num_received;
-//		{
-//			std::unique_lock<std::mutex> locker(_process_keys_mx);
-////						printf("\ngot keys from %d", from);
-////						_print_keys_of_party((Key*)(message+INPUT_KEYS_MSG_TYPE_SIZE), from);
-//
-//
-//			num_received = ++_num_inputkeys_msg_received;
-//		}
-//			if(num_received == _N-1)
-//			{
-////				_print_keys();
-//				_check_evaluate();
-//			}
-////		}
-//		break;
-//	}
 	case TYPE_KEY_PER_IN_WIRE:
 	{
 //		printf("TYPE_KEY_PER_IN_WIRE from %d\n", from);
@@ -254,7 +213,7 @@ void Party::NewMessage(int from, char* message, unsigned int len)
 	{
 //					printf("TYPE_ALL_KEYS_PER_IN_WIRE\n");
 		_process_all_input_keys(message+INPUT_KEYS_MSG_TYPE_SIZE);
-//					printf("all input keys:\n");
+					printf("all input keys:\n");
 //					phex(message+INPUT_KEYS_MSG_TYPE_SIZE, 2*_N*_IO*sizeof(Key));
 //					_print_input_keys_checksum();
 		_check_evaluate();
@@ -300,7 +259,7 @@ void Party::_check_evaluate()
 	printf("\n\npress for EVALUATING\n\n");
 	getchar();
 
-	exec_props_t* execs = new exec_props_t[_NUMTHREADS];
+	exec_props_t* execs = new exec_props_t[_NUMTHREADS+1];
 	unsigned long diff;
 	for (int ntry=1; ntry<=_NUMTRIES; ntry++) {
 		for(int nthreads=1; nthreads<=_NUMTHREADS; nthreads+=1) {
@@ -327,9 +286,9 @@ void Party::_check_evaluate()
 			diff = GET_DIFF(b, a);
 //			printf("#threads = %d, time = %lu\n", nthreads, diff);
 			execs[nthreads].acc += diff;
-			if (diff < execs[nthreads].min || execs[nthreads].min==0)
+			if (diff < execs[nthreads].min || execs[nthreads].min==0) {
 				execs[nthreads].min = diff;
-
+			}
 		}
 	}
 
@@ -341,7 +300,7 @@ void Party::_check_evaluate()
 	int best_minmin  = 1;
 	int best_avgmin  = 1;
 	for(int nthreads=1; nthreads<=_NUMTHREADS; nthreads++) {
-//		printf("#nthreads = %d, min = %lu, acc = %llu\n",nthreads, execs[nthreads].min, execs[nthreads].acc);
+		printf("#nthreads = %d, min = %lu, acc = %llu\n",nthreads, execs[nthreads].min, execs[nthreads].acc);
 		if(execs[nthreads].min < minmin) {
 			minmin = execs[nthreads].min;
 			best_minmin = nthreads;

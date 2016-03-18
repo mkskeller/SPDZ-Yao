@@ -4,14 +4,17 @@
 
 CPPFLAGS=-g -O3 -msse -msse2 -maes -msse4.1 -mavx2 -c -w --std=c++11 \
 		 -D__PRIME_FIELD__ \
+		 -DNO__PURE_SHE__ \
 		 -I/usr/include \
 		 -Iinc \
 		 -I../network/inc \
 		 -I../circuit_bmr/inc \
+		 -I../mpir-2.7.2  \
 		 $(LOCAL_CPPFLAGS)
 
 LDFLAGS=-g -L/usr/lib/x86_64-linux-gnu/ \
-	-lboost_system -lpthread  -lboost_thread $(LOCAL_LDFLAGS)
+		   -L/usr/local/lib \
+		   -lboost_system -lpthread -lboost_thread -lmpirxx -lmpir $(LOCAL_LDFLAGS)
 
 OBJECTS=../circuit_bmr/build/BooleanCircuit.o \
 		../circuit_bmr/build/Key.o \

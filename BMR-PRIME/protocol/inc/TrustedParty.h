@@ -42,7 +42,10 @@ private:
 
 	std::atomic_int _num_prf_received;
 	std::atomic_int _received_gc_received;
-
+#ifdef __PURE_SHE__
+	mpz_t _temp_mpz;
+	void _fill_keys_for_party(Key* sqr_keys, Key* keys, party_id_t pid);
+#endif
 	void _fill_keys_for_party(Key* keys, party_id_t pid);
 	void _merge_keys(Key* dest, Key* src);
 	void _generate_masks();
