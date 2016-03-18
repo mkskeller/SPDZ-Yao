@@ -1,0 +1,1 @@
+../mpn/x86_64/sandybridge/submul_1.asm

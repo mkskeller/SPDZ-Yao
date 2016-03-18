@@ -1,0 +1,1 @@
+../mpn/x86_64/sandybridge/nand_n.asm

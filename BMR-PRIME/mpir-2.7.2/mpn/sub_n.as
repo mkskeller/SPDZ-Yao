@@ -1,0 +1,1 @@
+../mpn/x86_64/sandybridge/sub_n.as
