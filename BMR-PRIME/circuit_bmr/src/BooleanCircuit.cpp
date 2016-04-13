@@ -41,7 +41,7 @@ void BooleanCircuit::_parse_circuit(const char* desc_file)
 	circuit_file >> _num_output_wires;
 	circuit_file >> _output_start;
 	std::cout << "# output wires: " << _num_output_wires << " starts at " << _output_start << std::endl;
-	int largest_output_wire;
+	int largest_output_wire = _output_start;
 	for (unsigned int i = 1; i < _num_output_wires; i++) //NOTE: starts with i=1 !
 		circuit_file >> largest_output_wire; // ignore all but the last one
 	_wires.resize(_output_start, Wire(false));
