@@ -38,19 +38,20 @@ def lt_block(cir, n, x0, y0, output_max=True):
         if not i==(n-1):
             a[i] = cir.add_gate(xi,yi, circuit.XOR)
             b[i] = cir.add_gate(b[i-1], a[i], circuit.OR)
-    lt = c[i]
+    lt = c[n-1]
+    if not output_max:
+        lt = cir.add_gate(lt, x0+n-1, circuit.LEFT)
     
     maximum=[]
     if output_max:
-        lt = c[n-1]
         temp1 = {}
         temp2 = {}
         max = {}
         for i in range(0,n):
             xi = x0+i
             yi = y0+i
-            temp1[i] = cir.add_gate(c[i], yi, circuit.AND)
-            temp2[i] = cir.add_gate(c[i], xi, circuit.NOT_AND)
+            temp1[i] = cir.add_gate(lt, yi, circuit.AND)
+            temp2[i] = cir.add_gate(lt, xi, circuit.NOT_AND)
         for i in range(0,n):
             max[i] = cir.add_gate(temp1[i], temp2[i], circuit.OR)
             maximum.append(max[i])

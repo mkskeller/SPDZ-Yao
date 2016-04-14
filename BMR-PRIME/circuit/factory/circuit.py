@@ -10,6 +10,7 @@ AND     = "0001"
 NOT_AND = "0100"
 ALL1    = "1111"
 EQ      = "0011"
+LEFT    = "0011"
 
 PHONY_WIRE = -1
 
@@ -38,6 +39,7 @@ class Circuit:
         self.ow = [] #list of output wires
     def add_gate(self, l, r, f):
         self.gates.append(Gate(l,r,self.free, f))
+#         print "[%d]%s"%(len(self.gates),str(self.gates[len(self.gates)-1]))
         outw = self.free
         self.free +=1
         return outw
