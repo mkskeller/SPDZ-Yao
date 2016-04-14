@@ -1,3 +1,6 @@
+import sys
+import new
+
 GT      = "0100"
 XOR     = "0110"
 NEQ     = XOR
@@ -5,10 +8,15 @@ OR      = "0111"
 NOT     = "1000"
 AND     = "0001"
 NOT_AND = "0100"
+ALL1    = "1111"
+EQ      = "0011"
 
+PHONY_WIRE = -1
 
 class Gate:
     def __init__(self, lw, rw, ow, f):
+        if (not type(lw)==type(rw)==type(ow)==int) or (not type(f)==str):
+            sys.exit("!!! bad gate!")
         self.lw = lw
         self.rw = rw
         self.ow = ow
@@ -39,10 +47,35 @@ class Circuit:
         elif type(wire)==list:
             for w in wire:
                 self.ow.append(w)
+#     def replace_wire(self, orig, new):
+#         for g in self.gates:
+#             if g.lw == orig:
+#                 g.lw = new
+#             if g.rw == orig:
+#                 g.rw = new
+#             if g.ow == orig:
+#                 g.ow = new
+#     def switch_wires(self, first, second):
+#         self.replace_wire(second, PHONY_WIRE)
+#         self.replace_wire(first, second)
+#         self.replace_wire(PHONY_WIRE, first)
+#     def organize(self):
+#         num_out_wires = len(self.ow)
+#         ow0 = self.free-num_out_wires
+#         for i in range(num_out_wires):
+#             w = ow0+i
+# #             print "switch %d with %d"%(w,self.ow[i])
+#             self.switch_wires(w, self.ow[i])
+#         self.ow = range(ow0,ow0+num_out_wires)
+    def wire_outputs(self):
+        new_ow = []
+        for w in self.ow:
+            new_ow.append(self.add_gate(w, w, EQ))
+        self.ow = new_ow
     def __str__(self):
         #add num gates and num parties
         circuit_str = "%d\n%d\n"%(len(self.gates), self.np)
-        #add input wires for every party
+        #add input wires for evesecondry party
         for i in range(self.np):
             circuit_str += "%d %d\n"%(i+1,self.iipl[i]) 
             for j in range(self.in_st[i], self.in_st[i]+self.iipl[i]):

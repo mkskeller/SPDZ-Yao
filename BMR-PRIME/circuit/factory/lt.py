@@ -1,7 +1,7 @@
 
 import circuit
 
-def lt_gate(cir, n, x0, y0, output_max=True):
+def lt_block(cir, n, x0, y0, output_max=True):
     """
     Add the circuitry to compute the less then function on two n-bits numbers
     begins with x0 and y0.
@@ -19,13 +19,12 @@ def lt_gate(cir, n, x0, y0, output_max=True):
         a0 = x0 XOR x0
         b0 = a0
         c0 = y0  //( if we wanted to achieve X>Y we should have taken x0)
-        ...
+        ...lt_block
         ...
         ai= xi XOR yi
         bi = b_{i-1} OR ai  //(i.e. whether x1...xi NEQ y1...yi)
         ci = ( b_{i-1} AND c_{i-1} ) OR ( NOT b_{i-1} AND yi) // computed by the NOT_AND gate
     """
-    outputs = []
     a = {0:cir.add_gate(x0,y0, circuit.XOR)}
     b = {0:a[0]}
     c = {0:y0}
@@ -39,8 +38,9 @@ def lt_gate(cir, n, x0, y0, output_max=True):
         if not i==(n-1):
             a[i] = cir.add_gate(xi,yi, circuit.XOR)
             b[i] = cir.add_gate(b[i-1], a[i], circuit.OR)
-    outputs.append(c[i])
+    lt = c[i]
     
+    maximum=[]
     if output_max:
         lt = c[n-1]
         temp1 = {}
@@ -53,14 +53,14 @@ def lt_gate(cir, n, x0, y0, output_max=True):
             temp2[i] = cir.add_gate(c[i], xi, circuit.NOT_AND)
         for i in range(0,n):
             max[i] = cir.add_gate(temp1[i], temp2[i], circuit.OR)
-            outputs.append(max[i])
+            maximum.append(max[i])
     
-    return outputs
+    return (lt,maximum)
     
 
 if __name__ == "__main__":
     BIT_LENGTH = 16
     c = circuit.Circuit(2,[16,16])
-    outputs = lt_gate(c, BIT_LENGTH, 0,BIT_LENGTH, True)
-    c.add_to_output_wires(outputs[1:])
+    lt,maximum = lt_block(c, BIT_LENGTH, 0,BIT_LENGTH, True)
+    c.add_to_output_wires(maximum)
     print str(c)
