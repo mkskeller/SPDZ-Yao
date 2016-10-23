@@ -1,1 +1,0 @@
-../mpn/x86_64/divrem_euclidean_qr_2.as

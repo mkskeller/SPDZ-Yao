@@ -1,1 +1,0 @@
-../mpn/x86_64/sandybridge/xnor_n.asm

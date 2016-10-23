@@ -1,1 +1,0 @@
-../mpn/generic/dc_div_qr_n.c

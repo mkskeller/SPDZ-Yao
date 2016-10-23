@@ -1,1 +1,0 @@
-../mpn/x86_64/sandybridge/rsh_divrem_hensel_qr_1_2.asm

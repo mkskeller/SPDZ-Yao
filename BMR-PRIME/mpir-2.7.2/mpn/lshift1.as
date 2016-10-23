@@ -1,1 +1,0 @@
-../mpn/x86_64/sandybridge/lshift1.as

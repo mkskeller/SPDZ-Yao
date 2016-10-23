@@ -1,1 +1,0 @@
-../mpn/x86_64/sub_err1_n.asm

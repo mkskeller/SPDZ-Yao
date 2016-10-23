@@ -1,1 +1,0 @@
-../mpn/generic/sumdiff_n.c

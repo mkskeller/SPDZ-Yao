@@ -1,1 +1,0 @@
-../mpn/generic/neg_n.c

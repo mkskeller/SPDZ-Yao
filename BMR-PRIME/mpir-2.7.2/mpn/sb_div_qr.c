@@ -1,1 +1,0 @@
-../mpn/generic/sb_div_qr.c

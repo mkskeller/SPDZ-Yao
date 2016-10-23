@@ -1,1 +1,0 @@
-../mpn/generic/rootrem_basecase.c

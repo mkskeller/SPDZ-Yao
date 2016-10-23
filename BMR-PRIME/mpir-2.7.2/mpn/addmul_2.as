@@ -1,1 +1,0 @@
-../mpn/x86_64/sandybridge/addmul_2.as
