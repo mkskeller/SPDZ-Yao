@@ -1,8 +1,8 @@
+// (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
+
 /*
  * Client.cpp
  *
- *  Created on: Jan 27, 2016
- *      Author: bush
  */
 
 #include "Client.h"
@@ -28,20 +28,15 @@ static void throw_bad_ip(const char* ip) {
 }
 
 Client::Client(endpoint_t* endpoints, int numservers, ClientUpdatable* updatable, unsigned int max_message_size)
-	:_numservers(numservers),
-	 _max_msg_sz(max_message_size),
-	 _updatable(updatable),
-	 _new_message(false)
+	:_max_msg_sz(max_message_size),
+	 _numservers(numservers),
+	 _updatable(updatable)
 	 {
 	_sockets = new int[_numservers](); // 0 initialized
 	_servers = new struct sockaddr_in[_numservers];
-	_msg_queues = new Queue<Msg>[_numservers]();
+	_msg_queues = new WaitQueue< shared_ptr<SendBuffer> >[_numservers];
 
-	_lockqueue = new std::mutex[_numservers];
-	_queuecheck = new std::condition_variable[_numservers];
-	_new_message = new bool[_numservers]();
-
-	memset(_servers, 0, sizeof(_servers));
+	memset(_servers, 0, sizeof(*_servers));
 
 	for (int i=0; i<_numservers; i++) {
 		_sockets[i] = socket(AF_INET, SOCK_STREAM, 0);
@@ -56,20 +51,32 @@ Client::Client(endpoint_t* endpoints, int numservers, ClientUpdatable* updatable
 }
 
 Client::~Client() {
+	Stop();
 	for (int i=0; i<_numservers; i++)
 		close(_sockets[i]);
 	delete[] _sockets;
 	delete[] _servers;
 	delete[] _msg_queues;
-	delete[] _lockqueue;
-	delete[] _queuecheck;
-	delete[] _new_message;
+#ifdef DEBUG_COMM
+	printf("Client:: Client deleted\n");
+#endif
 }
 
 void Client::Connect() {
 	for (int i=0; i<_numservers; i++)
-		new boost::thread(&Client::_send_thread, this, i);
-	new boost::thread(&Client::_connect, this);
+		threads.add_thread(new boost::thread(&Client::_send_thread, this, i));
+	threads.add_thread(new boost::thread(&Client::_connect, this));
+}
+
+void Client::Stop() {
+	for (int i=0; i<_numservers; i++)
+		_msg_queues[i].stop();
+	threads.join_all();
+	for (int i=0; i<_numservers; i++)
+		shutdown(_sockets[i], SHUT_RDWR);
+#ifdef DEBUG_COMM
+	printf("Stopped client\n");
+#endif
 }
 
 void Client::_connect() {
@@ -89,95 +96,100 @@ void Client::_connect_to_server(int i) {
 	int port = ntohs(_servers[i].sin_port);
 	ip = inet_ntoa(_servers[i].sin_addr);
 	int error = 0;
+	int interval = 10000;
+	int total_wait = 0;
 	while (true ) {
 		error = connect(_sockets[i], (struct sockaddr *)&_servers[i], sizeof(struct sockaddr));
+		if (interval < CONNECT_INTERVAL)
+			interval *= 2;
 		if(!error)
 			break;
 		if (errno == 111) {
 			fprintf(stderr,".");
 		} else {
 			fprintf(stderr,"Client:: Error (%d): connect to %s:%d: \"%s\"\n",errno, ip,port,strerror(errno));
-			fprintf(stderr,"Client:: socket %d sleeping for %u usecs\n",i, CONNECT_INTERVAL);
+			fprintf(stderr,"Client:: socket %d sleeping for %u usecs\n",i, interval);
 		}
-		usleep(CONNECT_INTERVAL);
+		usleep(interval);
+		total_wait += interval;
+		if (total_wait > 60e6)
+			throw runtime_error("waiting for too long");
 	}
 
 	printf("\nClient:: connected to %s:%d\n", ip,port);
-	setsockopt(_sockets[i], SOL_SOCKET, SO_SNDBUF, &BUFFER_SIZE, sizeof(BUFFER_SIZE));
+	// Using the following disables the automatic buffer size (ipv4.tcp_wmem)
+	// in favour of the core.wmem_max, which is worse.
+	//setsockopt(_sockets[i], SOL_SOCKET, SO_SNDBUF, &NETWORK_BUFFER_SIZE, sizeof(NETWORK_BUFFER_SIZE));
 }
 
-void Client::Send(int id, const char* message, unsigned int len) {
-	Msg new_msg = {message, len};
+void Client::Send(int id, SendBuffer& buffer) {
     {
-        std::unique_lock<std::mutex> locker(_lockqueue[id]);
-//        printf ("Client:: queued %u bytes to %d\n", len, id);
-        _msg_queues[id].Enqueue(new_msg);
-        _new_message[id] = true;
-        _queuecheck[id].notify_one();
+#ifdef DEBUG_COMM
+        printf ("Client:: queued %u bytes to %d\n", buffer.size(), id);
+        phex(buffer.data(), 4);
+#endif
+    	SendBuffer* tmp = new SendBuffer;
+    	*tmp = buffer;
+    	shared_ptr<SendBuffer> new_msg(tmp);
+        _msg_queues[id].push(new_msg);
     }
 }
 
-void Client::Broadcast(const char* message, unsigned int len) {
+void Client::Broadcast(SendBuffer& buffer) {
+#ifdef DEBUG_COMM
+	printf ("Client:: queued %u bytes to broadcast\n", buffer.size());
+	phex(buffer.data(), 4);
+#endif
+	SendBuffer* tmp = new SendBuffer;
+	*tmp = buffer;
+	shared_ptr<SendBuffer> new_msg(tmp);
 	for(int i=0;i<_numservers; i++) {
-		std::unique_lock<std::mutex> locker(_lockqueue[i]);
-		Msg new_msg = {message, len};
-        _msg_queues[i].Enqueue(new_msg);
-        _new_message[i] = true;
-        _queuecheck[i].notify_one();
+        _msg_queues[i].push(new_msg);
 	}
 }
 
-void Client::Broadcast2(const char* message, unsigned int len) {
+void Client::Broadcast2(SendBuffer& buffer) {
+#ifdef DEBUG_COMM
+	printf ("Client:: queued %u bytes to broadcast to all but the server\n", buffer.size());
+	phex(buffer.data(), 4);
+#endif
+	SendBuffer* tmp = new SendBuffer;
+	*tmp = buffer;
+	shared_ptr<SendBuffer> new_msg(tmp);
 	// first server is always the trusted party so we start with i=1
 	for(int i=1;i<_numservers; i++) {
-		std::unique_lock<std::mutex> locker(_lockqueue[i]);
-		Msg new_msg = {message, len};
-        _msg_queues[i].Enqueue(new_msg);
-        _new_message[i] = true;
-        _queuecheck[i].notify_one();
+        _msg_queues[i].push(new_msg);
 	}
 }
 
 void Client::_send_thread(int i) {
-	while(true)
-	{
-		{
-			std::unique_lock<std::mutex> locker(_lockqueue[i]);
-			//printf("Client:: waiting for a notification to send to %d\n", i);
-			_queuecheck[i].wait(locker);
-			if (!_new_message[i]) {
-//				printf("Client:: Spurious notification!\n");
-				continue;
-			}
-			//printf("Client:: notified!!\n");
-		}
-		while (true)
-		{
-			Msg msg = {0};
-			{
-				std::unique_lock<std::mutex> locker(_lockqueue[i]);
-				if(_msg_queues[i].Empty()) {
-					//printf("Client:: no more messages in queue\n");
-					break; // out of the inner while
-				}
-				msg = _msg_queues[i].Dequeue();
-			}
-			_send_blocking(msg, i);
-		}
-		_new_message[i] = false;
-	}
+	shared_ptr<SendBuffer> msg;
+	while(_msg_queues[i].pop_dont_stop(msg))
+		_send_blocking(*msg, i);
+#ifdef DEBUG_COMM
+	printf("Shutting down sender thread %d\n", i);
+#endif
 }
 
-void Client::_send_blocking(Msg msg, int id) {
-//	printf ("Client:: sending %u bytes to %d\n", msg.len, id);
+void Client::_send_blocking(SendBuffer& msg, int id) {
+#ifdef DEBUG_COMM
+	printf ("Client:: sending %llu bytes at 0x%x to %d\n", msg.size(), msg.data(), id);
+	fflush(0);
+#ifdef DEBUG2
+	phex(msg.data(), msg.size());
+#else
+	phex(msg.data(), 4);
+#endif
+#endif
 	int cur_sent = 0;
-	cur_sent = send(_sockets[id], &msg.len, LENGTH_FIELD, 0);
-	if(LENGTH_FIELD == cur_sent) {
+	size_t len = msg.size();
+	cur_sent = send(_sockets[id], &len, sizeof(len), 0);
+	if(sizeof(len) == cur_sent) {
 		unsigned int total_sent = 0;
 		unsigned int remaining = 0;
-		while(total_sent != msg.len) {
-			remaining = (msg.len-total_sent)>_max_msg_sz ? _max_msg_sz : (msg.len-total_sent);
-			cur_sent = send(_sockets[id], msg.msg+total_sent, remaining, 0);
+		while(total_sent != msg.size()) {
+			remaining = (msg.size()-total_sent)>_max_msg_sz ? _max_msg_sz : (msg.size()-total_sent);
+			cur_sent = send(_sockets[id], msg.data()+total_sent, remaining, 0);
 			//printf("Client:: msg.len=%u, remaining=%u, total_sent=%u, cur_sent = %d\n",msg.len, remaining, total_sent,cur_sent);
 			if(cur_sent == -1) {
 				fprintf(stderr,"Client:: Error: send msg failed: %s\n",strerror(errno));
@@ -188,4 +200,10 @@ void Client::_send_blocking(Msg msg, int id) {
 	} else if (-1 == cur_sent){
 		fprintf(stderr,"Client:: Error: send header failed: %s\n",strerror(errno));
 	}
+#ifdef DEBUG_COMM
+	printf ("Client:: sent %u bytes at 0x%x to %d\n", msg.size(), msg.data(), id);
+	fflush(0);
+	phex(msg.data(), 4);
+	fflush(0);
+#endif
 }

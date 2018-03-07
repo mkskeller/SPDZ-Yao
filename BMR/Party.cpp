@@ -1,8 +1,8 @@
+// (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
+
 /*
  * Party.cpp
  *
- *  Created on: Feb 15, 2016
- *      Author: bush
  */
 
 #include "Party.h"
@@ -18,10 +18,29 @@
 #include "proto_utils.h"
 #include "msg_types.h"
 #include "prf.h"
+#include "BooleanCircuit.h"
+#include "Math/Setup.h"
 
 #ifdef __PURE_SHE__
 #include "mpirxx.h"
 #endif
+
+ProgramParty* ProgramParty::singleton = 0;
+
+
+BaseParty::BaseParty(party_id_t id) : _id(id)
+{
+#ifdef DEBUG_PRNG_PARTY
+	octet seed[SEED_SIZE];
+	memset(seed, 0, sizeof(seed));
+	seed[0] = id;
+	prng.SetSeed(seed);
+#endif
+}
+
+BaseParty::~BaseParty()
+{
+}
 
 Party::Party(const char* netmap_file, // required to init Node
 		   const char* circuit_file, // required to init BooleanCircuit
@@ -29,206 +48,182 @@ Party::Party(const char* netmap_file, // required to init Node
 		   const std::string input,
 		   int numthreads,
 		   int numtries
-		   ) :_id(id),
+		   ) :BaseParty(id),
 		   	  _all_input(input),
 			  _NUMTHREADS(numthreads),
 			  _NUMTRIES(numtries)
 {
 	_circuit = new BooleanCircuit( circuit_file );
+	_circuit->party = this;
 	_G = _circuit->NumGates();
-	_N = _circuit->NumParties();
+#ifndef N_PARTIES
+    _N = _circuit->NumParties();
+#endif
 	_W = _circuit->NumWires();
 	_OW = _circuit->NumOutWires();
 	_IO = _circuit->_num_input_wires;
-	_circuit->_masks = new char[_W];
+	resize_registers();
 #ifdef __PURE_SHE__
 	init_modulos();
 #endif
-	_initialize_input();
+	reset();
 	_generate_prf_inputs();
-	_allocate_prf_outputs();
-	_allocate_input_wire_keys();
-	_allocate_external_values();
+	init(netmap_file, id, _N);
 	_num_externals_msg_received = {0};//ATOMIC_VAR_INIT(0);
 	_num_inputkeys_msg_received = {0};//ATOMIC_VAR_INIT(0);
-	printf("netmap_file: %s\n", netmap_file);
-	if (0 == strcmp(netmap_file, LOOPBACK_STR)) {
-		_node = new Node( NULL, id, this , _N+1);
-	} else {
-		_node = new Node( netmap_file, id, this );
-	}
-}
-
-void Party::_allocate_external_values()
-{
-	_circuit->_externals = (char*)malloc(_W);
-	memset(_circuit->_externals,NO_SIGNAL,_W);
-}
-
-void Party::_allocate_input_wire_keys ()
-{
-	_input_wire_keys_msg_sz = INPUT_KEYS_MSG_TYPE_SIZE+_IO*sizeof(Key);
-	_input_wire_keys_msg = (char*)malloc(_input_wire_keys_msg_sz);
-	memset(_input_wire_keys_msg, 0, _input_wire_keys_msg_sz);
 }
 
 void Party::_initialize_input()
 {
 	party_t me = _circuit->_parties[_id];
 	std::string my_input = _all_input.substr(me.wires, me.n_wires);
-	_input = new char[me.n_wires+1];
+	_input.resize(me.n_wires);
 	const char* input = my_input.c_str();
-	memcpy(_input, input, me.n_wires);
+	memcpy(_input.data(), input, me.n_wires);
 
-	for(int i=0; i<me.n_wires; i++) {
+	for(size_t i=0; i<me.n_wires; i++) {
 		_input[i]-=0x30;
 	}
+#ifdef DEBUG
 	printf("inputs:\n");
-	phex(_input, me.n_wires);
+	phex(_input.data(), me.n_wires);
+#endif
 }
 
 Party::~Party() {
-	// TODO Auto-generated destructor stub
 }
 
-void Party::NodeReady()
+void BaseParty::NodeReady()
 {
 	printf("Node is ready\n");
 }
 
-void Party::NewMessage(int from, char* message, unsigned int len)
+void BaseParty::NewMessage(int from, ReceivedMsg& msg)
 {
+	char* message = msg.data();
+	size_t len = msg.size();
 //	printf("got message of len %u from %d\n", len, from);
 	MSG_TYPE message_type;
-	memcpy(&message_type, message, sizeof(MSG_TYPE));
+	msg.unserialize(message_type);
+#ifdef DEBUG_STEPS
+	cout << "processing " << message_type_names[message_type] << " from " << dec
+			<< from << " of length " << msg.size() << endl;
+#endif
+	unique_lock<mutex> locker(global_lock);
 	switch(message_type) {
 	case TYPE_KEYS:
 		{
+#ifdef DEBUG_STEPS
 		printf("TYPE_KEYS\n");
-		unsigned int keys_sz = 2*_W*_N*sizeof(Key);
-		_circuit->_keys = (Key*)malloc(keys_sz);
-		memcpy(_circuit->_keys, message+MSG_KEYS_HEADER_SZ, keys_sz);
-//				phex(_circuit->Keys(), 2* _W * _N * sizeof(Key));
-//				printf("\n");
-//				_print_keys();
-
-		_compute_prfs_outputs();
-//				_print_prfs();
+#endif
+#ifdef DEBUG2
+		cout << "received keys" << endl;
+		phex(message, len);
+#endif
+		get_buffer(TYPE_PRF_OUTPUTS);
+		_compute_prfs_outputs((Key*)(message + MSG_KEYS_HEADER_SZ));
 		_send_prfs();
 //		printf("sent prfs\n");
 		break;
 		}
 	case TYPE_MASK_INPUTS:
 		{
+#ifdef DEBUG_STEPS
 		printf("TYPE_MASK_INPUTS\n");
-		_generate_external_values_msg(message+sizeof(MSG_TYPE));
+#endif
+		input_masks.insert(input_masks.end(), message + sizeof(MSG_TYPE), message + len);
+#ifdef DEBUG_COMM
+		cout << "got " << dec << input_masks.size() << " input masks" << endl;
+#endif
+		input_mask = input_masks.begin();
 		break;
 		}
 	case TYPE_MASK_OUTPUT:
 		{
+#ifdef DEBUG_STEPS
 		printf("TYPE_MASK_OUTPUT\n");
-		memcpy(_circuit->Masks()+_circuit->OutWiresStart(), message+sizeof(MSG_TYPE), _OW);
-		 	 	// TODO: only test!
-//		 	 	 phex(_circuit->Masks(), _W);
+#endif
+#ifdef DEBUG_OUTPUT_MASKS
+		cout << "receiving " << msg.left() << " output masks" << endl;
+#endif
+		mask_output(msg);
 		break;
 		}
 	case TYPE_GARBLED_CIRCUIT:
 	{
+#ifdef DEBUG_STEPS
 		printf("TYPE_GARBLED_CIRCUIT\n");
-		unsigned int garbled_tbl_sz = _G*4*_N*sizeof(Key);
-		_circuit->_garbled_tbl = (Key*)malloc(garbled_tbl_sz);
-		_circuit->_garbled_tbl_copy = (Key*)malloc(garbled_tbl_sz);
-		memcpy(_circuit->_garbled_tbl, message+sizeof(MSG_TYPE), garbled_tbl_sz);
-		memcpy(_circuit->_garbled_tbl_copy, message+sizeof(MSG_TYPE), garbled_tbl_sz);
+#endif
+#ifdef DEBUG2
+		phex(message, len);
+#endif
+#ifdef DEBUG_COMM
+		cout << "got " << len << " bytes for " << get_garbled_tbl_size() << " gates" << endl;
+#endif
+		if ((len - 4) != 4 * _N * sizeof(Key) * get_garbled_tbl_size())
+			throw runtime_error("wrong size of garbled table");
+		store_garbled_circuit(msg);
 
 //				printf("\nGarbled Table\n\n");
 //				_printf_garbled_table();
-		char garbled_circuit_cs = cs((char*)_circuit->_garbled_tbl , garbled_tbl_sz);
-		printf ("\ngarbled_circuit_cs = %d\n", garbled_circuit_cs);
+//		char garbled_circuit_cs = cs((char*)_garbled_tbl , garbled_tbl_sz);
+//		printf ("\ngarbled_circuit_cs = %d\n", garbled_circuit_cs);
 
-		char* received_gc_msg = new char[sizeof(MSG_TYPE)];
-		fill_message_type(received_gc_msg, TYPE_RECEIVED_GC);
-		_node->Send(SERVER_ID, received_gc_msg, sizeof(MSG_TYPE));
+		_node->Send(SERVER_ID, get_buffer(TYPE_RECEIVED_GC));
 
 		break;
 	}
 	case TYPE_EXTERNAL_VALUES:
 	{
 		//this is done by party 1 only
-//		printf("TYPE_EXTERNAL_VALUES from %d\n",from);
+#ifdef DEBUG_STEPS
+		printf("TYPE_EXTERNAL_VALUES from %d\n",from);
+#endif
 		_process_external_received(message+sizeof(MSG_TYPE), from);
-
-		int num_received;
-		{
-		std::unique_lock<std::mutex> locker(_process_externals_mx);
-		num_received = ++_num_externals_msg_received;
-		}
-		if(num_received == _N-1) {
-			char* all_externals = new char[_IO+sizeof(MSG_TYPE)];
-			fill_message_type(all_externals, TYPE_ALL_EXTERNAL_VALUES);
-			memcpy(all_externals+sizeof(MSG_TYPE), _circuit->_externals,_IO);
-			_node->Broadcast2(all_externals, _IO+sizeof(MSG_TYPE));
-//			printf("sending all externals\n");
-//			phex(all_externals+sizeof(MSG_TYPE), _IO);
-		}
 		break;
 	}
 	case TYPE_ALL_EXTERNAL_VALUES:
 	{
-//		printf("TYPE_ALL_EXTERNAL_VALUES\n");
-//		phex(message+sizeof(MSG_TYPE), _IO);
+#ifdef DEBUG_STEPS
+		printf("TYPE_ALL_EXTERNAL_VALUES\n");
+#endif
 		_process_all_external_received(message+sizeof(MSG_TYPE));
-		fill_message_type(_input_wire_keys_msg, TYPE_KEY_PER_IN_WIRE);
-		_node->Send(1, _input_wire_keys_msg, _input_wire_keys_msg_sz);
 		break;
 	}
 	case TYPE_KEY_PER_IN_WIRE:
 	{
-//		printf("TYPE_KEY_PER_IN_WIRE from %d\n", from);
+#ifdef DEBUG_STEPS
+		printf("TYPE_KEY_PER_IN_WIRE from %d\n", from);
+#endif
 		_process_input_keys((Key*)(message+INPUT_KEYS_MSG_TYPE_SIZE), from);
-		int num_received;
-		{
-			std::unique_lock<std::mutex> locker(_process_keys_mx);
-			num_received = ++_num_inputkeys_msg_received;
-		}
-//		printf("num_received = %d\n",num_received);
-		if(num_received == _N-1)
-		{
-//			printf("received input keys from everyone\n");
-			unsigned int all_keys_msg_sz = 2*_N*_IO*sizeof(Key)+INPUT_KEYS_MSG_TYPE_SIZE;
-			char* all_keys_msg = new char[all_keys_msg_sz];
-			fill_message_type(all_keys_msg, TYPE_ALL_KEYS_PER_IN_WIRE);
-			memcpy(all_keys_msg+INPUT_KEYS_MSG_TYPE_SIZE, _circuit->_keys, 2*_N*_IO*sizeof(Key));
-//						printf("all input keys:\n");
-//						_print_input_keys_checksum();
-//						phex(all_keys_msg+INPUT_KEYS_MSG_TYPE_SIZE, 2*_N*_IO*sizeof(Key));
-			_node->Broadcast2(all_keys_msg, all_keys_msg_sz);
-			_check_evaluate();
-		}
-
-
 		break;
 	}
 	case TYPE_ALL_KEYS_PER_IN_WIRE:
 	{
-//					printf("TYPE_ALL_KEYS_PER_IN_WIRE\n");
+#ifdef DEBUG_STEPS
+					printf("TYPE_ALL_KEYS_PER_IN_WIRE\n");
+#endif
 		_process_all_input_keys(message+INPUT_KEYS_MSG_TYPE_SIZE);
-					printf("all input keys:\n");
-//					phex(message+INPUT_KEYS_MSG_TYPE_SIZE, 2*_N*_IO*sizeof(Key));
-//					_print_input_keys_checksum();
-		_check_evaluate();
 		break;
 	}
 	case TYPE_LAUNCH_ONLINE:
 	{
+#ifdef DEBUG_STEPS
 		printf("TYPE_LAUNCH_ONLINE\n");
+#endif
+		cout << "Launching online phase at " << timer.elapsed() << endl;
+		_node->print_waiting();
+		// store a token item in case it's needed just before ending the program
+		ReceivedMsg msg;
+		// to avoid copying from address 0
+		msg.resize(1);
+		// for valgrind
+		msg.data()[0] = 0;
+		// token input round
+		store_garbled_circuit(msg);
+		online_timer.start();
 		_start_online_net = GET_TIME();
-//		_node->Broadcast2(_external_values_msg, _external_values_msg_sz);
-		if(_id!=1) {
-//					printf("sending my externals:\n");
-//					phex(_external_values_msg+sizeof(MSG_TYPE), _circuit->Party(_id).n_wires);
-			_node->Send(1,_external_values_msg, _external_values_msg_sz);
-		}
+		start_online_round();
 		break;
 	}
 	case TYPE_CHECKSUM:
@@ -237,21 +232,55 @@ void Party::NewMessage(int from, char* message, unsigned int len)
 		printf("got checksum = %d\n", message[sizeof(MSG_TYPE)]);
 		break;
 		}
+	case TYPE_SPDZ_WIRES:
+		receive_spdz_wires(msg);
+		break;
+	case TYPE_DELTA:
+		msg.unserialize(delta);
+		break;
 	default:
 		{
 		printf("UNDEFINED\n");
 		printf("got undefined message\n");
 		phex(message, len);
+		break;
 		}
 	}
 
+#ifdef DEBUG_STEPS
+	cout << "done with " << message_type_names[message_type] << " from " << from << endl;
+#endif
+}
+
+void Party::start_online_round()
+{
+		_generate_external_values_msg();
+//		_node->Broadcast2(_external_values_msg, _external_values_msg_sz);
+		if(_id!=1) {
+//					printf("sending my externals:\n");
+//					phex(_external_values_msg+sizeof(MSG_TYPE), _circuit->Party(_id).n_wires);
+			_node->Send(1,_external_values_msg);
+		}
+}
+
+void Party::store_garbled_circuit(ReceivedMsg& msg)
+{
+	auto end = get_garbled_tbl_end();
+	for (auto it = _garbled_tbl.begin(); it != end; it++)
+	{
+		it->unserialize(msg, _N);
+#ifdef DEBUG
+		it->print();
+#endif
+	}
 }
 
 void Party::_check_evaluate()
 {
+	load_garbled_circuit();
 	_end_online_net = GET_TIME();
 	printf("Network time: ");
-	PRINT_DIFF(_start_online_net, _end_online_net);
+	PRINT_DIFF(&_start_online_net, &_end_online_net);
 #ifdef __PRIME_FIELD__
 	printf("this implementation uses PRIME FIELD\n");
 #endif
@@ -259,15 +288,15 @@ void Party::_check_evaluate()
 	printf("\n\npress for EVALUATING\n\n");
 	getchar();
 
-	exec_props_t* execs = new exec_props_t[_NUMTHREADS+1];
+	vector<exec_props_t> execs(_NUMTHREADS+1);
 	unsigned long diff;
 	for (int ntry=1; ntry<=_NUMTRIES; ntry++) {
 		for(int nthreads=1; nthreads<=_NUMTHREADS; nthreads+=1) {
-			memcpy(_circuit->_garbled_tbl, _circuit->_garbled_tbl_copy, _G*4*_N*sizeof(Key));
+//			_garbled_tbl = _garbled_tbl_copy;
 //				printf("num threads = %d\n", nthreads);
 
-					CALLGRIND_START_INSTRUMENTATION;
-			struct timeval* b;
+//					CALLGRIND_START_INSTRUMENTATION;
+			struct timeval b;
 			if(nthreads == 1) {
 				b = GET_TIME();
 //					printf("Linear evaluation\n");
@@ -277,13 +306,13 @@ void Party::_check_evaluate()
 //					printf("Non linear evaluation\n");
 				_circuit->EvaluateByLayer(nthreads, _id);
 			}
-					CALLGRIND_STOP_INSTRUMENTATION;
+//					CALLGRIND_STOP_INSTRUMENTATION;
 					CALLGRIND_DUMP_STATS;
-			struct timeval* a = GET_TIME();
+			struct timeval a = GET_TIME();
 //				_circuit->Output();
 
 //				printf("Eval time: ");
-			diff = GET_DIFF(b, a);
+			diff = GET_DIFF(&b, &a);
 //			printf("#threads = %d, time = %lu\n", nthreads, diff);
 			execs[nthreads].acc += diff;
 			if (diff < execs[nthreads].min || execs[nthreads].min==0) {
@@ -292,7 +321,9 @@ void Party::_check_evaluate()
 		}
 	}
 
+#ifdef DEBUG
 	_circuit->Output();
+#endif
 
 	//getting the best results
 	unsigned long minmin = execs[1].min;
@@ -312,10 +343,12 @@ void Party::_check_evaluate()
 	}
 	printf("\nRESULTS SUM:\n");
 	printf("Got minimal time with %d threads: %ld\n", best_minmin, minmin);
-	printf("Got minimal AVERAGE time with %d threads: %ld\n", best_avgmin, avgmin/_NUMTRIES);
+	printf("Got minimal AVERAGE time with %d threads: %llu\n", best_avgmin, avgmin/_NUMTRIES);
+	fflush(0);
+	done();
 }
 
-void Party::Start()
+void BaseParty::Start()
 {
 	_node->Start();
 }
@@ -323,133 +356,47 @@ void Party::Start()
 
 void Party::_generate_prf_inputs()
 {
-	size_t size_of_inputs = _G*2*_N*16;
-	char * prf_inputs = new char[size_of_inputs]; //G*2*n*128bit
-	memset(prf_inputs, 0, size_of_inputs);
-
-	/* fill out this buffer s.t. first 4 bytes are the extension (0/1),
-	 * next 4 bytes are gate_id and next 4 bytes are party id.
-	 * For the first half we dont need to fill the extension because
-	 * it is zero anyway.
-	 */
-	unsigned int* prf_input_index = (unsigned int*)prf_inputs; //easier to refer as integers
-
-	for(unsigned int e=0; e<=1; e++) {
-		for (gate_id_t g=1; g<=_G; g++) {
-			for(party_id_t j=1; j<=_N; j++) {
-//				printf("e,g,j=%u,%u,%u\n",e,g,j);
-				*prf_input_index = e;
-				*(prf_input_index+1) = g;
-				*(prf_input_index+2) = j;
-				prf_input_index+=4;
-			}
-		}
+	resize_garbled_tbl();
+	for (gate_id_t g=1; g<=_G; g++)
+	{
+		_garbled_tbl[g-1].init_inputs(g, _N);
 	}
-//	phex(prf_inputs, size_of_inputs);
-
-	_circuit->PrfInputs(prf_inputs);
 }
 
-void Party::_allocate_prf_outputs() {
-	unsigned int prf_output_size = (PRFS_PER_PARTY(_G, _N)*sizeof(Key) + RESERVE_FOR_MSG_TYPE ) *_N ;
-	void* prf_outputs = malloc(prf_output_size);
-	memset(prf_outputs,0,prf_output_size);
-	_circuit->Prfs((char*)prf_outputs);
-
-//	printf("prf_output_size = %u\n",prf_output_size);
-//	printf("prf_outputs = %p-%p\n",prf_outputs, prf_outputs+prf_output_size);
-}
-
-void Party::_compute_prfs_outputs()
+void Party::_compute_prfs_outputs(Key* keys)
 {
-	unsigned int prf_outputs_offset = ( PRFS_PER_PARTY(_G,_N)*sizeof(Key) + RESERVE_FOR_MSG_TYPE )*(_id-1);
-	char* party_prf_outputs_starting_point = _circuit->Prfs() + prf_outputs_offset;
-	char* prf_outputs_index = party_prf_outputs_starting_point + RESERVE_FOR_MSG_TYPE;
+    receive_keys(keys);
+    for(gate_id_t g=1; g<=_G; g++) {
+		const Register* in_wires[2] = {&registers[_circuit->_gates[g]._left], &registers[_circuit->_gates[g]._right]};
+		_garbled_tbl[g-1].compute_prfs_outputs(in_wires, _id, buffers[TYPE_PRF_OUTPUTS], g);
+	}
+	printf("\n\n");
+}
 
-//	printf("party_prf_outputs_starting_point = %p\n",party_prf_outputs_starting_point);
-
-	for(gate_id_t g=1; g<=_G; g++) {
-		wire_id_t in_wires[2] = {_circuit->_gates[g]._left, _circuit->_gates[g]._right};
-		for(int w=0; w<=1; w++) {
-			for (int b=0; b<=1; b++) {
-				for (int e=0; e<=1; e++) {
-					//TODO optimize by computing for all j's together
-					for (int j=1; j<= _N; j++) {
-						Key* key = _circuit->_key(_id, in_wires[w], b);
-						char* input = _circuit->_input(e, g, j);
-						PRF_single(key,input, prf_outputs_index);
-#ifdef __PRIME_FIELD__
-						((Key*)prf_outputs_index)->adjust();
+void BaseParty::_send_prfs() {
+	_node->Send(SERVER_ID, buffers[TYPE_PRF_OUTPUTS]);
+#ifdef DEBUG2
+	printf("Send PRFs:\n");
+	phex(buffers[TYPE_PRF_OUTPUTS]);
 #endif
-						prf_outputs_index += RESERVE_FOR_MSG_TYPE;
-					}
-				}
-			}
-		}
-	}
-//	printf("\n\n");
-//	phex(party_prf_outputs_starting_point, RESERVE_FOR_MSG_TYPE);
-//	printf("\n");
-//	phex(party_prf_outputs_starting_point+RESERVE_FOR_MSG_TYPE, PRFS_PER_PARTY(G,N)*sizeof(Key));
-}
-
-void Party::_send_prfs() {
-	unsigned int prfs_size = PRFS_PER_PARTY(_G,_N)*sizeof(Key);
-	unsigned int prf_outputs_offset = (prfs_size + RESERVE_FOR_MSG_TYPE) * (_id-1);
-
-	char* party_prf_outputs_starting_point = _circuit->Prfs() + prf_outputs_offset + RESERVE_FOR_MSG_TYPE - sizeof(MSG_TYPE);
-	fill_message_type(party_prf_outputs_starting_point, TYPE_PRF_OUTPUTS);
-
-	_node->Send(SERVER_ID, party_prf_outputs_starting_point, prfs_size+sizeof(MSG_TYPE));
-//	printf("\n");
-//	phex(party_prf_outputs_starting_point, prfs_size+sizeof(MSG_TYPE));
-}
-
-void Party::_print_prfs()
-{
-	unsigned int prf_outputs_offset = ( PRFS_PER_PARTY(_G,_N)*sizeof(Key) + RESERVE_FOR_MSG_TYPE )*(_id-1);
-	char* party_prf_outputs_starting_point = _circuit->Prfs() + prf_outputs_offset;
-	char* prf_outputs_index = party_prf_outputs_starting_point + RESERVE_FOR_MSG_TYPE;
-
-	for (gate_id_t g=1; g<=_G; g++) {
-		wire_id_t in_wires[2] = {_circuit->_gates[g]._left, _circuit->_gates[g]._right};
-		for(int w=0; w<=1; w++) {
-			for (int b=0; b<=1; b++) {
-				for (int e=0; e<=1; e++) {
-//					phex(prf_outputs_index, _N*sizeof(Key));
-//					printf("F_k^%d_{%u,%d}(%d,%u,1-n) = ", _id, in_wires[w], b, e, g);
-					for(party_id_t j=1; j<=_N; j++) {
-						Key k = *((Key*)(prf_outputs_index));
-//						std::cout << k << "  ";
-						prf_outputs_index += sizeof(Key);
-					}
-//					std::cout << std::endl<< std::endl;
-				}
-			}
-		}
-	}
 }
 
 void Party::_print_keys()
 {
 	for (wire_id_t w=0; w<_IO; w++) {
-		for(int x=0; x<=1; x++) {
-			printf("k^%d_{%u,%d}:  ",_id,w,x);
-			Key* key_idx = _circuit->_key(_id,w,x);
-			std::cout << *key_idx << std::endl;
-		}
+		registers[w].keys.print(w, _id);
 	}
 }
 
 
 void Party::_printf_garbled_table()
 {
-	for (gate_id_t g=1; g<=_G; g++) {
+	for (gate_id_t g=1; g<=get_garbled_tbl_size(); g++) {
 		std::cout << "gate " << g << std::endl;
 		for(int entry=0; entry<4; entry++) {
 			for(party_id_t i=1; i<=_N; i++) {
-				Key* k = _circuit->_garbled_entry(g, entry);
-				std::cout << *(k+i-1) << " ";
+				KeyVector& k = _garbled_entry(g, entry);
+				std::cout << k[i-1] << " ";
 			}
 			std::cout << std::endl;
 		}
@@ -461,7 +408,7 @@ void Party::_print_keys_of_party(Key *keys, int id)
 {
 	printf("\nkeys for party %d", id);
 	for(wire_id_t w=0; w<_IO; w++) {
-		printf("k^%d_%d: ", id, w);
+		printf("k^%d_%lu: ", id, w);
 		std::cout << keys[w] << std::endl;
 	}
 }
@@ -469,62 +416,139 @@ void Party::_print_keys_of_party(Key *keys, int id)
 void Party::_print_input_keys_msg()
 {
 	for(wire_id_t w=0; w<_IO; w++) {
-		std::cout << *(Key*)(_input_wire_keys_msg+INPUT_KEYS_MSG_TYPE_SIZE+w*sizeof(Key)) << std::endl;
+		std::cout << *(Key*)(_input_wire_keys_msg.data()+INPUT_KEYS_MSG_TYPE_SIZE+w*sizeof(Key)) << std::endl;
 	}
 }
 
 
 
-
-void Party::_generate_external_values_msg(char *masks)
+void Party::_generate_external_values_msg()
 {
-	party_t me = _circuit->_parties[_id];
-	wire_id_t s = me.wires; //the beginning of my wires
-	wire_id_t n = me.n_wires; // number of my wires
-	_external_values_msg_sz = sizeof(MSG_TYPE) + n;
-	_external_values_msg = (char*)malloc (_external_values_msg_sz);
+	_initialize_input();
+    prepare_input_regs(_id);
+	_external_values_msg.clear();
 	fill_message_type(_external_values_msg, TYPE_EXTERNAL_VALUES);
-	char *exv_msg = _external_values_msg+sizeof(MSG_TYPE);
-	for(wire_id_t i=0; i<n; i++) {
-		wire_id_t w = s+i;
-		_circuit->_externals[w] = exv_msg[i] = masks[i]^_input[i];
-		*(_circuit->_key(_id, w, 1-exv_msg[i])) = 0;
+	unsigned int n = (*input_regs)[_id].size();
+#ifdef DEBUG_ROUNDS
+	cout << dec << _input.size() << "/" << n <<  " inputs" << " in round "
+			<< input_regs.get_i() << endl;
+#endif
+	if (n != _input.size())
+		throw runtime_error("number of inputs doesn't match");
+	for(unsigned int i=0; i<n; i++) {
+		if (input_mask == input_masks.end())
+			throw runtime_error("not enough masks");
+		char val = *input_mask^_input[i];
+		input_mask++;
+		_external_values_msg.push_back(val);
+		get_reg((*input_regs)[_id][i]).set_external(val);
 	}
+#ifdef DEBUG_VALUES
+	cout << "on registers:" << endl;
+	for(unsigned int i=0; i<n; i++)
+			cout << (*input_regs)[_id][i] << " ";
+	cout << endl;
+	cout << "inputs:\t\t\t";
+	print_bit_array(_input.data(), n);
+	cout << "masks:\t\t\t";
+	print_bit_array(&*(input_mask - n), n);
+	cout << "externals:\t\t";
+	print_bit_array(&_external_values_msg[4], n);
+#endif
 
-//					phex(masks, n);
-//					phex(_input, n);
-//					phex(_external_values_msg+sizeof(MSG_TYPE), n);
+#ifdef DEBUG2
+					phex(&*(input_mask - n), n);
+					phex(_input.data(), n);
+					phex(_external_values_msg.data()+sizeof(MSG_TYPE), n);
+#endif
 }
 
 void Party::_process_external_received(char* externals, party_id_t from)
 {
-	party_t sender = _circuit->_parties[from];
-	wire_id_t s = sender.wires; //the beginning of my wires
-	wire_id_t n = sender.n_wires; // number of my wires
-	char* exv = _circuit->_externals;
+	prepare_input_regs(from);
 
 //	printf("received externals from %d\n", from);
 //	phex(externals, n);
-
-	for(unsigned int i=0; i<n; i++) {
-		wire_id_t w = s+i;
-		exv[w] = externals[i];
-		*(_circuit->_key(_id,w,1-exv[w])) = 0;
+	for(unsigned int i=0; i<(*input_regs)[from].size(); i++) {
+		get_reg((*input_regs)[from][i]).set_external(externals[i]);
 	}
+#ifdef DEBUG_VALUES
+	cout << "externals from " << from << ":\t";
+	print_bit_array(externals, (*input_regs)[from].size());
+	cout << "masks:\t\t\t";
+	print_masks((*input_regs)[from]);
+	cout << "outputs:\t\t";
+	print_masks((*input_regs)[from]);
+	cout << "on registers:" << endl;
+	print_indices((*input_regs)[from]);
+#endif
+
+		size_t num_received;
+		{
+		std::unique_lock<std::mutex> locker(_process_externals_mx);
+		num_received = ++_num_externals_msg_received;
+		}
+		if(num_received == _N-1) {
+			_num_externals_msg_received = 0;
+			SendBuffer& buffer = get_buffer(TYPE_ALL_EXTERNAL_VALUES);
+			int w = 0;
+			for (size_t i = 0; i < _N; i++)
+			{
+				prepare_input_regs(i + 1);
+				vector<int>& regs = (*input_regs)[i+1];
+				for (unsigned int j = 0; j < regs.size(); j++)
+				{
+					buffer.push_back(registers[regs[j]].get_external());
+					w++;
+				}
+			}
+			_node->Broadcast2(buffer);
+//			printf("sending all externals\n");
+//			phex(all_externals+sizeof(MSG_TYPE), _IO);
+		}
 }
 
 void Party::_process_all_external_received(char* externals)
 {
-	memcpy(_circuit->_externals, externals, _IO);
-	Key* keys_msg = (Key*)(_input_wire_keys_msg+INPUT_KEYS_MSG_TYPE_SIZE);
-	for(wire_id_t w=0; w<_IO; w++) {
-		keys_msg[w] = * _circuit->_key(_id,w,_circuit->_externals[w]);
+//		phex(message+sizeof(MSG_TYPE), _IO);
+		_input_wire_keys_msg.clear();
+		fill_message_type(_input_wire_keys_msg, TYPE_KEY_PER_IN_WIRE);
+		_input_wire_keys_msg.resize(INPUT_KEYS_MSG_TYPE_SIZE);
+
+	int w = 0;
+	for (size_t i = 0; i < _N; i++)
+	{
+		prepare_input_regs(i + 1);
+		vector<int>& regs = (*input_regs)[i+1];
+		for (unsigned int j = 0; j < regs.size(); j++)
+		{
+			get_reg(regs[j]).set_external(externals[w]);
+			get_reg(regs[j]).external_key(_id).serialize(_input_wire_keys_msg);
+#ifdef DEBUG
+			printf("k^%d_{%u,%d}=", _id,w,registers[regs[j]].get_external());
+			std::cout << registers[regs[j]].external_key(_id) << std::endl;
+#endif
+			w++;
+		}
+#ifdef DEBUG_VALUES
+		cout << "on registers:" << endl;
+		for (unsigned j = 0; j < (*input_regs)[i + 1].size(); j++)
+			cout << (*input_regs)[i + 1][j] << " ";
+		cout << endl;
+		cout << "externals from " << (i + 1) << ":\t";
+		print_bit_array(externals, regs.size());
+		cout << "masks:\t\t\t";
+		print_masks(output_regs);
+		cout << "outputs:\t\t";
+		print_outputs(output_regs);
+#endif
 	}
 
-//	for(wire_id_t w=0; w<_IO; w++) {
-//		printf("k^%d_{%u,%d}=", _id,w,_circuit->_externals[w]);
-//		std::cout << keys_msg[w] << std::endl;
-//	}
+		_node->Send(1, _input_wire_keys_msg);
+#ifdef DEBUG2
+		printf("input wire keys:\n");
+		phex(_input_wire_keys_msg);
+#endif
 }
 
 //void Party::_process_input_keys(char* keys, party_id_t from)
@@ -546,10 +570,50 @@ void Party::_process_input_keys(Key* keys, party_id_t from)
 //		std::cout << keys[w] << std::endl;
 //	}
 
-	char *exv = _circuit->_externals;
-	for(wire_id_t w=0; w<_IO; w++) {
-		*(_circuit->_key(from,w,exv[w])) = keys[w];
+	int w = 0;
+	for (size_t i = 0; i < _N; i++)
+	{
+		prepare_input_regs(i + 1);
+		for (unsigned int j = 0; j < (*input_regs)[i+1].size(); j++)
+		{
+			get_reg((*input_regs)[i+1][j]).set_external_key(from, keys[w]);
+			w++;
+		}
 	}
+
+		size_t num_received;
+		{
+			std::unique_lock<std::mutex> locker(_process_keys_mx);
+			num_received = ++_num_inputkeys_msg_received;
+		}
+//		printf("num_received = %d\n",num_received);
+		if(num_received == _N-1)
+		{
+			_num_inputkeys_msg_received = 0;
+#ifdef DEBUG_STEPS
+			printf("received input keys from everyone\n");
+#endif
+			SendBuffer& buffer = get_buffer(TYPE_ALL_KEYS_PER_IN_WIRE);
+			buffer.resize(INPUT_KEYS_MSG_TYPE_SIZE);
+			int w = 0;
+			for (size_t i = 0; i < _N; i++)
+			{
+				prepare_input_regs(i + 1);
+				for (unsigned int j = 0; j < (*input_regs)[i+1].size(); j++)
+				{
+					get_reg((*input_regs)[i+1][j]).keys.serialize(buffer);
+					w++;
+				}
+			}
+#ifdef DEBUG2
+						printf("all input keys:\n");
+						_print_input_keys_checksum();
+						phex(buffer);
+#endif
+			_node->Broadcast2(buffer);
+			_check_evaluate();
+		}
+
 }
 
 
@@ -558,49 +622,336 @@ void Party::_process_all_input_keys(char* keys)
 	/* keys: a block containing 2*_N keys for each input wire so the
 	 * receiver only has to copy one time.
 	*/
-	memcpy(_circuit->_keys, keys, _IO*2*_N*sizeof(Key));
+	int w = 0;
+	for (size_t i = 0; i < _N; i++)
+	{
+		prepare_input_regs(i + 1);
+		for (unsigned int j = 0; j < (*input_regs)[i+1].size(); j++)
+		{
+			get_reg((*input_regs)[i+1][j]).set_eval_keys((Key*)keys+w*2*_N, _N, _id - 1);
+			w++;
+		}
+	}
+
+#ifdef DEBUG
+					printf("all input keys:\n");
+//					phex(message+INPUT_KEYS_MSG_TYPE_SIZE, 2*_N*_IO*sizeof(Key));
+					_print_input_keys_checksum();
+#endif
+		_check_evaluate();
 }
 
 void Party::_print_input_keys_checksum()
 {
-	for (wire_id_t w=0; w<_IO; w++) {
-		char x = _circuit->_externals[w];
-		for(int x=0; x<=1; x++) {
-			printf("k^I_{%u,%d}:  ",w,x);
-			for (party_id_t i=1; i<=_N; i++) {
-				Key* key_idx = _circuit->_key(i,w,x);
-				std::cout << *key_idx << "  ";
-			}
-			std::cout << std::endl;
+	int w = 0;
+	for (unsigned int i = 0; i < (*input_regs).size(); i++)
+		for (unsigned int j = 0; j < (*input_regs)[i].size(); j++)
+			registers[(*input_regs)[i][j]].print_input(w++);
+}
+
+void Party::mask_output(ReceivedMsg& msg)
+{
+	char* masks = msg.consume(0);
+	size_t n_masks = msg.left();
+	prepare_output_regs();
+	if (n_masks != output_regs.size())
+		throw runtime_error("number of masks doesn't match");
+	for (unsigned int i = 0; i < output_regs.size(); i++)
+		get_reg(output_regs[i]).set_mask(masks[i]);
+#ifdef DEBUG_VALUES
+	cout << "received output masks in registers:" << endl;
+	vector<char> externals(output_regs.size()), outputs(output_regs.size());
+	for (unsigned int i = 0; i < output_regs.size(); i++)
+	{
+		externals[i] = get_reg(output_regs[i]).get_external_no_check();
+		outputs[i] = get_reg(output_regs[i]).get_output_no_check();
+		cout << output_regs[i] << " ";
+	}
+	cout << endl;
+	cout << "masks:\t\t\t";
+	print_bit_array(masks, output_regs.size());
+	cout << "externals:\t\t";
+	print_bit_array(externals);
+	cout << "outputs:\t\t";
+	print_bit_array(outputs);
+#endif
+}
+
+void Party::receive_keys(Key* keys) {
+	resize_registers();
+	for (size_t w = 0; w < _W; w++)
+	{
+		registers[w].init(_N);
+		for (int i = 0; i < 2; i++)
+			registers[w].keys[i][_id - 1] = *(keys + w * 2 + i);
+	}
+#ifdef DEBUG
+                _print_keys();
+#endif
+}
+
+int Party::get_n_inputs() {
+	int res = 0;
+	for (size_t i = 0; i < _N; i++)
+	{
+		prepare_input_regs(i + 1);
+		vector<int>& regs = (*input_regs)[i+1];
+		res += regs.size();
+	}
+	return res;
+}
+
+void BaseParty::done() {
+	cout << "Online phase took " << online_timer.elapsed() << " seconds" << endl;
+	_node->Send(SERVER_ID, get_buffer(TYPE_DONE));
+	_node->Stop();
+}
+
+ProgramParty::ProgramParty(int argc, char** argv) :
+        		BaseParty(-1), keys_for_prf(0),
+        		spdz_storage(0), garbled_storage(0), spdz_counters(SPDZ_OP_N),
+				machine(dynamic_memory),
+        		processor(machine), prf_machine(dynamic_memory),
+        		prf_processor(prf_machine),
+				MC(0)
+{
+	if (argc < 3)
+	{
+		cerr << "Usage: " << argv[0] << " <id> <program> [netmap]" << endl;
+		exit(1);
+	}
+
+	_id = atoi(argv[1]);
+	ifstream file((string("Programs/Bytecode/") + argv[2] + "-0.bc").c_str());
+	program.parse(file);
+	machine.reset(program);
+	processor.reset(program);
+	prf_machine.reset(*reinterpret_cast<GC::Program<GC::Secret<PRFRegister> >* >(&program));
+	prf_processor.reset(*reinterpret_cast<GC::Program<GC::Secret<PRFRegister> >* >(&program));
+	if (singleton)
+		throw runtime_error("there can only be one");
+	singleton = this;
+	if (argc > 3)
+	{
+		int n_parties = init(argv[3], _id);
+		ifstream netmap(argv[3]);
+		int tmp;
+		string tmp2;
+		netmap >> tmp >> tmp2 >> tmp;
+		vector<string> hostnames(n_parties);
+		for (int i = 0; i < n_parties; i++)
+		{
+			netmap >> hostnames[i];
+			netmap >> tmp;
+		}
+		N.init(_id - 1, 5000, hostnames);
+	}
+	else
+	{
+		int n_parties = init("LOOPBACK", _id);
+		N.init(_id - 1, 5000, vector<string>(n_parties, "localhost"));
+	}
+	prf_output = (char*)new __m128i[PAD_TO_8(get_n_parties())];
+	mac_key = prng.get_word() & ((1ULL << GC::Secret<EvalRegister>::default_length) - 1);
+	cout << "MAC key: " << hex << mac_key << endl;
+	ifstream schfile((string("Programs/Schedules/") + argv[2] + ".sch").c_str());
+	string curr, prev;
+	while (schfile.good())
+	{
+		prev = curr;
+		getline(schfile, curr);
+	}
+	cout << "Compiler: " << prev << endl;
+	P = new Player(N, 0);
+	if (argc > 4)
+		threshold = atoi(argv[4]);
+	else
+		threshold = 128;
+	cout << "Threshold for multi-threaded evaluation: " << threshold << endl;
+}
+
+ProgramParty::~ProgramParty()
+{
+	reset();
+	delete[] prf_output;
+	delete P;
+	if (MC)
+		delete MC;
+	cout << "SPDZ loading: " << spdz_counters[SPDZ_LOAD] << endl;
+	cout << "SPDZ storing: " << spdz_counters[SPDZ_STORE] << endl;
+	cout << "SPDZ wire storage: " << 1e-9 * spdz_storage << " GB" << endl;
+	cout << "Dynamic storage: " << 1e-9 * dynamic_memory.capacity() * 
+			sizeof(GC::Secret<EvalRegister>::DynamicType) << " GB" << endl;
+	cout << "Maximum circuit storage: " << 1e-9 * garbled_storage << " GB" << endl;
+}
+
+void ProgramParty::_compute_prfs_outputs(Key* keys)
+{
+	keys_for_prf = keys;
+	first_phase(program, prf_processor, prf_machine);
+}
+
+void ProgramParty::reset()
+{
+	CommonParty::reset();
+}
+
+void ProgramParty::store_garbled_circuit(ReceivedMsg& msg)
+{
+	garbled_storage = max(msg.size(), garbled_storage);
+	garbled_circuits.push(msg);
+}
+
+void ProgramParty::load_garbled_circuit()
+{
+	if (not garbled_circuits.pop(garbled_circuit))
+		throw runtime_error("no garbled circuit available");
+	if (not output_masks_store.pop(output_masks))
+		throw runtime_error("no output masks available");
+#ifdef DEBUG_OUTPUT_MASKS
+	cout << "loaded " << output_masks.left() << " output masks" << endl;
+#endif
+}
+
+void ProgramParty::start_online_round()
+{
+	machine.reset_timer();
+	_check_evaluate();
+}
+
+void ProgramParty::_check_evaluate()
+{
+#ifdef DEBUG_REGS
+	print_round_regs();
+#endif
+	cout << "Online time at evaluation start: " << online_timer.elapsed()
+			<< endl;
+	GC::BreakType next = GC::TIME_BREAK;
+	while (next == GC::TIME_BREAK)
+	{
+		load_garbled_circuit();
+		next = second_phase(program, processor, machine);
+	}
+	cout << "Online time at evaluation stop: " << online_timer.elapsed()
+			<< endl;
+	if (next == GC::TIME_BREAK)
+	{
+#ifdef DEBUG_STEPS
+		cout << "another round of garbling" << endl;
+#endif
+	}
+	if (next != GC::DONE_BREAK)
+	    {
+#ifdef DEBUG_STEPS
+		cout << "another round of evaluation" << endl;
+#endif
+		start_online_round();
+	    }
+	else
+	{
+		Timer timer;
+		timer.start();
+		MC->Check(*P);
+		cout << "Final check took " << timer.elapsed() << endl;
+		done();
+	}
+}
+
+void ProgramParty::receive_keys(Register& reg)
+{
+	reg.init(_N);
+	for (int i = 0; i < 2; i++)
+		reg.keys[i][_id-1] = *(keys_for_prf++);
+#ifdef DEBUG
+	cout << "receive keys " << reg.get_id() << "(" << &reg << ") " << dec << reg.keys[0].size() << endl;
+	reg.keys.print(reg.get_id(), _id);
+	cout << "delta " << reg.get_id() << " " << (reg.keys[0][_id-1] ^ reg.keys[1][_id-1]) << endl;
+#endif
+}
+
+void ProgramParty::receive_all_keys(Register& reg, bool external)
+{
+	reg.init(get_n_parties());
+	for (int i = 0; i < get_n_parties(); i++)
+		reg.keys[external][i] = *(keys_for_prf++);
+}
+
+void ProgramParty::input_value(party_id_t from, char value)
+{
+	if (from == _id)
+	{
+		if (value and (1 - value))
+			throw runtime_error("invalid input");
+	}
+	throw not_implemented();
+}
+
+void ProgramParty::receive_spdz_wires(ReceivedMsg& msg)
+{
+	int op;
+	msg.unserialize(op);
+	spdz_wires[op].push_back({});
+	size_t l = msg.left();
+	spdz_wires[op].back().append((octet*)msg.consume(l), l);
+	spdz_storage += l;
+#ifdef DEBUG_SPDZ_WIRES
+	cout << "receive " << dec << spdz_wires[op].back().get_length() << "/"
+			<< msg.size() << " bytes for type " << op << endl;
+#endif
+	if (op == SPDZ_MAC)
+	{
+		gf2n spdz_mac_key;
+		spdz_mac_key.unpack(spdz_wires[op].back());
+		if (!MC)
+		{
+			MC = new Passing_MAC_Check<gf2n>(spdz_mac_key, N, 0);
+			cout << "MAC key: " << hex << spdz_mac_key << endl;
+			mac_key = spdz_mac_key;
 		}
 	}
 }
 
-
-/* Gets as an argument a config file with the following format:
- * <netmap_file><newline>
- * <circuit_description_file><newline>
- * <party_id>
- */
-int main(int argc, char *argv[]) {
-
-	assert(argc==3);
-	std::string config_file = argv[1];
-	std::ifstream params(config_file);
-	assert(params.good()); // manages to open the file
-	party_id_t pid = atoi(argv[2]);
-
-	int numthreads, numtrials;
-	std::string netmap_path, circuit_path, input;
-	params >> netmap_path >> circuit_path >> input >> numthreads >> numtrials;
-
-#ifdef __PRIME_FIELD__
-		printf("this implementation uses PRIME FIELD\n");
+void ProgramParty::get_spdz_wire(SpdzOp op, SpdzWire& spdz_wire)
+{
+	while (true)
+	{
+		if (spdz_wires[op].empty())
+			throw runtime_error("no SPDZ wires available");
+		if (spdz_wires[op].front().done())
+			spdz_wires[op].pop_front();
+		else
+			break;
+	}
+	spdz_wire.unpack(spdz_wires[op].front(), get_n_parties());
+	spdz_counters[op]++;
+#ifdef DEBUG_SPDZ_WIRE
+	cout << "get SPDZ wire of type " << op << ", " << spdz_wires[op].front().left() << " bytes left" << endl;
+	cout << "mask share for " << get_id() << ": " << spdz_wire.mask << endl;
 #endif
+}
 
-	Party* p = new Party(netmap_path.c_str(), circuit_path.c_str(), pid, input, numthreads, numtrials);
-	p->Start();
-	pause();
+void ProgramParty::store_wire(const Register& reg)
+{
+	wires.serialize(reg.key(get_id(), 0));
+#ifndef FREE_XOR
+	wires.serialize(reg.key(get_id(), 1));
+#endif
+#ifdef DEBUG
+	cout << "storing wire" << endl;
+	reg.print();
+#endif
+}
 
-	return 0;
+void ProgramParty::load_wire(Register& reg)
+{
+	wires.unserialize(reg.key(get_id(), 0));
+#ifdef FREE_XOR
+	reg.key(get_id(), 1) = reg.key(get_id(), 0) ^ get_delta();
+#else
+	wires.unserialize(reg.key(get_id(), 1));
+#endif
+#ifdef DEBUG
+	cout << "loading wire" << endl;
+	reg.print();
+#endif
 }

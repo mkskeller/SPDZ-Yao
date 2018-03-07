@@ -1,8 +1,8 @@
+// (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
+
 /*
  * Client.h
  *
- *  Created on: Jan 27, 2016
- *      Author: bush
  */
 
 #ifndef NETWORK_INC_CLIENT_H_
@@ -17,6 +17,10 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <boost/thread.hpp>
+
+#include "Tools/WaitQueue.h"
+#include "Tools/FlexBuffer.h"
 
 #define CONNECT_INTERVAL (1000000)
 
@@ -34,22 +38,20 @@ public:
 	virtual ~Client();
 
 	void Connect();
-	void Send(int id, const char* message, unsigned int len);
-	void Broadcast(const char* message, unsigned int len);
-	void Broadcast2(const char* message, unsigned int len);
+	void Send(int id, SendBuffer& new_msg);
+	void Broadcast(SendBuffer& new_msg);
+	void Broadcast2(SendBuffer& new_msg);
+	void Stop();
 
 private:
 
-	Queue<Msg>* _msg_queues;
+	WaitQueue< shared_ptr<SendBuffer> >* _msg_queues;
 //	std::queue<Msg>* _msg_queues;
 //	boost::mutex* _msg_mux;
 //	boost::mutex* _thd_mux;
 	unsigned int _max_msg_sz;
-	std::mutex*              _lockqueue;
-	std::condition_variable* _queuecheck;
-	bool*					 _new_message;
 	void _send_thread(int i);
-	void _send_blocking(Msg msg, int id);
+	void _send_blocking(SendBuffer& msg, int id);
 
 	void _connect();
 	void _connect_to_server(int i);
@@ -58,6 +60,8 @@ private:
 	struct sockaddr_in* _servers;
 	int* _sockets;
 	ClientUpdatable* _updatable;
+
+	boost::thread_group threads;
 };
 
 #endif /* NETWORK_INC_CLIENT_H_ */

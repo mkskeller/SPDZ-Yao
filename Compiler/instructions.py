@@ -1,4 +1,4 @@
-# (C) 2018 University of Bristol. See License.txt
+# (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
 
 """ This module is for classes of actual assembly instructions.
 
@@ -333,6 +333,14 @@ class join_tape(base.Instruction):
 class crash(base.IOInstruction):
     r""" Crash runtime. """
     code = base.opcodes['CRASH']
+    arg_format = []
+
+class start_grind(base.IOInstruction):
+    code = base.opcodes['STARTGRIND']
+    arg_format = []
+
+class stop_grind(base.IOInstruction):
+    code = base.opcodes['STOPGRIND']
     arg_format = []
 
 @base.gf2n
@@ -1174,6 +1182,12 @@ class mulint(base.IntegerInstruction):
 class divint(base.IntegerInstruction):
     __slots__ = []
     code = base.opcodes['DIVINT']
+
+@base.vectorize
+class bitdecint(base.Instruction):
+    __slots__ = []
+    code = base.opcodes['BITDECINT']
+    arg_format = tools.chain(['ci'], itertools.repeat('ciw'))
 
 ###
 ### Clear comparison instructions

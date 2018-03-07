@@ -1,4 +1,4 @@
-# (C) 2018 University of Bristol. See License.txt
+# (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
 
 from Compiler.config import *
 from Compiler.exceptions import *
@@ -66,6 +66,8 @@ class Program(object):
         self.free_threads = set()
         self.public_input_file = open(self.programs_dir + '/Public-Input/%s' % self.name, 'w')
         self.types = {}
+        self.to_merge = [Compiler.instructions.startopen_class]
+        self.stop_class = Compiler.instructions.stopopen_class
         Program.prog = self
         
         self.reset_values()
@@ -125,6 +127,7 @@ class Program(object):
         self.name = progname
         if len(args) > 1:
             self.name += '-' + '-'.join(args[1:])
+        self.progname = progname
 
     def new_tape(self, function, args=[], name=None):
         if name is None:
@@ -534,7 +537,9 @@ class Tape:
                         (block.name, i, len(self.basicblocks), \
                          len(block.instructions))
                 # the next call is necessary for allocation later even without merging
-                merger = al.Merger(block, options)
+                merger = al.Merger(block, options, \
+                                   tuple(self.program.to_merge), \
+                                   self.program.stop_class)
                 if options.dead_code_elimination:
                     if len(block.instructions) > 10000:
                         print 'Eliminate dead code...'
@@ -545,8 +550,8 @@ class Tape:
                         block.defined_registers = set()
                         continue
                     if len(block.instructions) > 10000:
-                        print 'Merging open instructions...'
-                    numrounds = merger.longest_paths_merge()
+                        print 'Merging instructions...'
+                    numrounds = merger.longest_paths_merge(self.program.stop_class != type(None))
                     if numrounds > 0:
                         print 'Program requires %d rounds of communication' % numrounds
                     numinv = sum(len(i.args) for i in block.instructions if isinstance(i, Compiler.instructions.startopen_class))
@@ -555,7 +560,9 @@ class Tape:
                 if options.dead_code_elimination:
                     block.instructions = filter(lambda x: x is not None, block.instructions)
         if not (options.merge_opens and self.merge_opens):
-            print 'Not merging open instructions in tape %s' % self.name
+            print 'Not merging instructions in tape %s' % self.name
+        else:
+            print 'Rounds determined by', self.program.to_merge
 
         # add jumps
         offset = 0

@@ -1,14 +1,16 @@
+// (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
+
 
 #include "BooleanCircuit.h"
 
 #include "prf.h"
 
-static void throw_party_exists(pid_t pid, unsigned int pos) {
-	std::cout << "ERROR: in circuit description" << std::endl
-			  << "\tPosition: " << pos << std::endl
-			  << "\tPlayer id " << pid << " already exists" << std::endl;
-	throw std::invalid_argument( "player id error" );
-}
+//static void throw_party_exists(pid_t pid, unsigned int pos) {
+//	std::cout << "ERROR: in circuit description" << std::endl
+//			  << "\tPosition: " << pos << std::endl
+//			  << "\tPlayer id " << pid << " already exists" << std::endl;
+//	throw std::invalid_argument( "player id error" );
+//}
 
 static void throw_bad_circuit_file() {
 	std::cout << "ERROR: could not read circuit file" << std::endl;
@@ -27,7 +29,7 @@ void BooleanCircuit::_parse_circuit(const char* desc_file)
 	unsigned int total_input_wires;
 	circuit_file >> total_input_wires;
 
-	for (int idx_party = 1; idx_party <= _num_parties; idx_party++) {
+	for (size_t idx_party = 1; idx_party <= _num_parties; idx_party++) {
 		unsigned int num_input_wires = total_input_wires/_num_parties;
 		if (idx_party == _num_parties) {
 			num_input_wires = total_input_wires-(total_input_wires/_num_parties)*(_num_parties-1);
@@ -53,7 +55,7 @@ void BooleanCircuit::_parse_circuit(const char* desc_file)
 	/* Parse gates */
 	for (gate_id_t gate_id = 1; gate_id <= _num_gates; gate_id++)
 	{
-		int fan_in, fan_out, left, right, out;
+		size_t fan_in, fan_out, left, right, out;
 		std::string func;
 
 		circuit_file >> fan_in >> fan_out >> left >> right >> out >> func;
@@ -163,11 +165,11 @@ int BooleanCircuit::__make_layers(gate_id_t g)
 		return 0;
 	}
 	int layer_left, layer_right;
-	if(_gates[g]._left == NULL)
+	if(_gates[g]._left == 0)
 		layer_left = -1;
 	else
 		layer_left = __make_layers(_wires[_gates[g]._left]._out_from);
-	if(_gates[g]._right == NULL)
+	if(_gates[g]._right == 0)
 		layer_right = -1;
 	else
 		layer_right = __make_layers(_wires[_gates[g]._right]._out_from);
@@ -183,7 +185,7 @@ int BooleanCircuit::__make_layers(gate_id_t g)
 void BooleanCircuit::_add_to_layer(int layer, gate_id_t g)
 {
 //	printf("adding %u to layer %d\n", g, layer);
-	if (_layers.size()<layer+1) {
+	if (_layers.size()<(size_t)layer+1) {
 //		printf("layer doesn't exist, creating it\n");
 		_layers.resize(layer+1);
 	}
@@ -192,11 +194,11 @@ void BooleanCircuit::_add_to_layer(int layer, gate_id_t g)
 
 void BooleanCircuit::_print_layers()
 {
-	printf("num layers = %d\n",_layers.size());
-	for(int i=0; i<_layers.size(); i++) {
-		printf ("\nlayer %d size=%d\n",i,_layers[i].size());
-		for(int j=0; j<_layers[i].size(); j++) {
-			printf("%u  ", _layers[i][j]);
+	printf("num layers = %lu\n",_layers.size());
+	for(size_t i=0; i<_layers.size(); i++) {
+		printf ("\nlayer %lu size=%lu\n",i,_layers[i].size());
+		for(size_t j=0; j<_layers[i].size(); j++) {
+			printf("%lu  ", _layers[i][j]);
 		}
 		printf ("\n");
 	}
@@ -207,11 +209,11 @@ void BooleanCircuit::_validate_layers()
 	_max_layer_sz = 0;
 	for (gate_id_t g=1; g<_num_gates; g++){
 		if(_gates[g]._layer == NO_LAYER)
-			printf("gate %d has no layer!\n",g);
+			printf("gate %lu has no layer!\n",g);
 		assert(_gates[g]._layer != NO_LAYER);
 	}
 	gate_id_t sum_gates_in_layers = 0;
-	for(int i=0; i<_layers.size(); i++) {
+	for(size_t i=0; i<_layers.size(); i++) {
 		sum_gates_in_layers += _layers[i].size();
 		if(_layers[i].size() > _max_layer_sz) {
 			_max_layer_sz = _layers[i].size();
@@ -245,7 +247,7 @@ void BooleanCircuit::Inputs(const char* inputs_file_path)
 }
 
 BooleanCircuit::BooleanCircuit(const char* desc_file)
-:_num_evaluated_out_wires(0),_num_input_wires(0), _keys(NULL), _masks(NULL), _prf_inputs(NULL)
+:_num_evaluated_out_wires(0)
 {
 	_parse_circuit(desc_file);
 	_make_layers();
@@ -259,18 +261,17 @@ void BooleanCircuit::EvaluateByLayerLinearly(party_id_t my_id) {
 	mpz_t temp_mpz;
 	init_temp_mpz_t(temp_mpz);
 #endif
-	for(int i=0; i<_layers.size(); i++) {
-		for (int j=0; j<_layers[i].size(); j++) {
+	for(size_t i=0; i<_layers.size(); i++) {
+		for (size_t j=0; j<_layers[i].size(); j++) {
 			gate_id_t gid = _layers[i][j];
 #ifdef __PURE_SHE__
-			signal_t s = _eval_gate(gid, my_id, prf_output, temp_mpz);
+			_eval_gate(gid, my_id, prf_output, temp_mpz);
 #else
-			signal_t s = _eval_gate(gid, my_id, prf_output);
+			_eval_gate(gid, my_id, prf_output);
 #endif
-//			printf("%d ", s);
-			_externals[_gates[gid]._out] = s;
 		}
 	}
+	delete[] prf_output;
 }
 
 void BooleanCircuit::EvaluateByLayer(int num_threads, party_id_t my_id)
@@ -291,7 +292,7 @@ void BooleanCircuit::_eval_by_layer(int i, int num_threads, party_id_t my_id)
 	mpz_t temp_mpz;
 	init_temp_mpz_t(temp_mpz);
 #endif
-	for(int l=0; l<_layers.size(); l++) {
+	for(size_t l=0; l<_layers.size(); l++) {
 		int layer_sz = _layers[l].size();
 		int start_idx = (layer_sz/num_threads)*i;
 		int end_idx = (layer_sz/num_threads)*(i+1)-1;
@@ -301,11 +302,10 @@ void BooleanCircuit::_eval_by_layer(int i, int num_threads, party_id_t my_id)
 		for(int g=start_idx; g<=end_idx; g++) {
 			gate_id_t gid = _layers[l][g];
 #ifdef __PURE_SHE__
-			signal_t s = _eval_gate(gid, my_id, prf_output, temp_mpz);
+			_eval_gate(gid, my_id, prf_output, temp_mpz);
 #else
-			signal_t s = _eval_gate(gid, my_id, prf_output);
+			_eval_gate(gid, my_id, prf_output);
 #endif
-			_externals[_gates[gid]._out] = s;
 		}
 //		printf("done eval layer %d\n", l);
 
@@ -375,75 +375,17 @@ void BooleanCircuit::_eval_by_layer(int i, int num_threads, party_id_t my_id)
 //}
 
 #ifdef __PURE_SHE__
-signal_t BooleanCircuit::_eval_gate(gate_id_t g, party_id_t my_id, char* prf_output, mpz_t& tmp_mpz)
+void BooleanCircuit::_eval_gate(gate_id_t g, party_id_t my_id, char* prf_output, mpz_t& tmp_mpz)
 #else
-signal_t BooleanCircuit::_eval_gate(gate_id_t g, party_id_t my_id, char* prf_output)
+void BooleanCircuit::_eval_gate(gate_id_t g, party_id_t my_id, char* prf_output)
 #endif
 {
 //	std::cout << std::endl << "evaluate gate " << g << std::endl;
 	wire_id_t w_l = _gates[g]._left;
 	wire_id_t w_r = _gates[g]._right;
 	wire_id_t w_o = _gates[g]._out;
-	int sig_l = _externals[w_l];
-	int sig_r = _externals[w_r];
-	int entry = 2 * sig_l + sig_r;
-
-	Key* garbled_entry = _garbled_entry(g, entry);
-	int ext_l = entry%2 ? 1 : 0 ;
-	int ext_r = entry<2 ? 0 : 1 ;
-
-	Key k;
-	for(party_id_t i=1; i<=_num_parties; i++) {
-//								std::cout << "using key: " << *_key(i,w_l,sig_l) << ": ";
-		PRF_chunk(_key(i,w_l,sig_l), _input(ext_l,g,1), prf_output, PAD_TO_8(_num_parties));
-		for(party_id_t j=1; j<=_num_parties; j++) {
-			k = *(Key*)(prf_output+16*(j-1));
-#ifdef __PRIME_FIELD__
-			k.adjust();
-#endif
-//						printf("Fk^%d_{%u,%d}(%d,%u,%d) = ",i, w_l, sig_l,ext_l,g,j);
-//						std::cout << k << std::endl;
-			garbled_entry[j-1] -= k;
-		}
-
-		PRF_chunk(_key(i,w_r,sig_r), _input(ext_r,g,1) , prf_output, PAD_TO_8(_num_parties));
-		for(party_id_t j=1; j<=_num_parties; j++) {
-//									std::cout << "using key: " << *_key(i,w_r,sig_r) << ": ";
-			k = *(Key*)(prf_output+16*(j-1));
-#ifdef __PRIME_FIELD__
-			k.adjust();
-#endif
-//						printf("Fk^%d_{%u,%d}(%d,%u,%d) = ",i, w_r, sig_r,ext_r,g,j);
-//						std::cout << k << std::endl;
-			garbled_entry[j-1] -= k;
-		}
-	}
-
-#if __PURE_SHE__
-	for(party_id_t j=1; j<=_num_parties; j++) {
-		garbled_entry[j-1].sqr_in_place(tmp_mpz);
-	}
-#endif
-
-//	for(party_id_t i=1; i<=_num_parties; i++) {
-//		std::cout << garbled_entry[i-1] << "  ";
-//	}
-//	std::cout << std::endl;
-
-	if(garbled_entry[my_id-1] == *_key(my_id, w_o, 0)) {
-//		std::cout << "k^"<<my_id<<"_{"<<w_o<<",0} = " << *_key(my_id, w_o, 0) << std::endl;
-		memcpy(_key(1,w_o,0), garbled_entry, sizeof(Key)*_num_parties);
-		return 0;
-	} else if (garbled_entry[my_id-1] == *_key(my_id, w_o, 1)) {
-//		std::cout << "k^"<<my_id<<"_{"<<w_o<<",1} = " << *_key(my_id, w_o, 1) << std::endl;
-		memcpy(_key(1,w_o,1), garbled_entry, sizeof(Key)*_num_parties);
-		return 1;
-	} else {
-		printf("\nERROR!!!\n");
-//		throw std::invalid_argument("result key doesn't fit any of my keys");
-//		return NO_SIGNAL;
-	}
-
+	party->registers[w_o].eval(party->registers[w_l], party->registers[w_r],
+	        party->_garbled_tbl[g-1], my_id, prf_output, w_o, w_l, w_r);
 }
 
 
@@ -522,12 +464,11 @@ std::string BooleanCircuit::Output()
 {
 	std::cout << "output:" <<std::endl;
 	std::stringstream ss;
-//	printf("masks\n");
-//	phex(_masks, _wires.size());
-//	printf("externals\n");
-//	phex(_externals, _wires.size());
-	for( int i=0; i<_num_output_wires; i++ ) {
-		int output = _externals[_output_start+i] ^ _masks[_output_start+i];
+	printf("masks/externals\n");
+	for( size_t i=0; i<_num_output_wires; i++ ) {
+		cout << "mask " << i << ": " << (int)party->registers[_output_start+i].mask << endl;
+		cout << "external " << i << ": " << (int)party->registers[_output_start+i].get_external() << endl;
+		int output = party->registers[_output_start+i].get_output();
 		ss << output;
 	}
 	std::cout << ss.str();

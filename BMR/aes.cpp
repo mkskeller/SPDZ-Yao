@@ -1,3 +1,5 @@
+// (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
+
 #include "aes.h"
 
 #ifdef _WIN32

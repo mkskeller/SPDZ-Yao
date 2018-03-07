@@ -1,8 +1,8 @@
+// (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
+
 /*
  * Node.cpp
  *
- *  Created on: Jan 27, 2016
- *      Author: bush
  */
 
 #include <string.h>
@@ -26,12 +26,12 @@ static void throw_bad_id(int id) {
 
 Node::Node(const char* netmap_file, int my_id, NodeUpdatable* updatable, int num_parties)
 	:_id(my_id),
-	 _updatable(updatable),
 	 _connected_to_servers(false),
-	 _num_parties_identified(0)
+	 _num_parties_identified(0),
+	 _updatable(updatable)
 {
 	_parse_map(netmap_file, num_parties);
-	unsigned int max_message_size = BUFFER_SIZE/2;
+	unsigned int max_message_size = NETWORK_BUFFER_SIZE/2;
 	if(_id < 0 || _id > _numparties)
 		throw_bad_id(_id);
 	_ready_nodes = new bool[_numparties](); //initialized to false
@@ -41,21 +41,30 @@ Node::Node(const char* netmap_file, int my_id, NodeUpdatable* updatable, int num
 }
 
 Node::~Node() {
+	print_waiting();
 	delete(_client);
 	delete(_server);
-	delete (_endpoints);
-	delete (_ready_nodes);
-	delete (_clients_connected);
+	delete[] (_endpoints);
+	delete[] (_ready_nodes);
+	delete[] (_clients_connected);
 }
 
 
 void Node::Start() {
 	_client->Connect();
-	new boost::thread(&Node::_start, this);
+	boost::thread(&Node::_start, this).join();
+	_server->starter->join();
+	for (unsigned int i = 0; i < _server->listeners.size(); i++)
+		_server->listeners[i]->join();
+}
+
+void Node::Stop() {
+	_client->Stop();
 }
 
 void Node::_start() {
-	usleep(START_INTERVAL);
+	int interval = 10000;
+	int total_wait = 0;
 	while(true) {
 		bool all_ready = true;
 		if (_connected_to_servers) {
@@ -72,15 +81,27 @@ void Node::_start() {
 			break;
 		fprintf(stderr,"+");
 //		fprintf(stderr,"Node:: waiting for all nodes to get ready ; sleeping for %u usecs\n", START_INTERVAL);
-		usleep(START_INTERVAL);
+		if (interval < CONNECT_INTERVAL)
+			interval *= 2;
+		usleep(interval);
+		total_wait += interval;
+		if (total_wait > 60e6)
+			throw runtime_error("waiting for too long");
 	}
 	printf("All identified\n");
-	_client->Broadcast(ALL_IDENTIFIED,strlen(ALL_IDENTIFIED));
+	SendBuffer buffer;
+	buffer.serialize(ALL_IDENTIFIED, strlen(ALL_IDENTIFIED));
+	_client->Broadcast(buffer);
 }
 
-void Node::NewMsg(char* msg, unsigned int len, struct sockaddr_in* from) {
-	//printf("Node:: got message of length %d ",len);
-//	printf("from %s:%d\n", inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+void Node::NewMsg(ReceivedMsg& message, struct sockaddr_in* from) {
+	char* msg = message.data();
+	size_t len = message.size();
+#ifdef DEBUG_COMM
+	printf("Node:: got message of length %u at 0x%x\n",len,msg);
+	printf("from %s:%d\n", inet_ntoa(from->sin_addr), ntohs(from->sin_port));
+	phex(msg, 4);
+#endif	
 	if(len == strlen(ID_HDR)+sizeof(_id) && 0==strncmp(msg, ID_HDR, strlen(ID_HDR))) {
 		int *id = (int*)(msg+strlen(ID_HDR));
 		printf("Node:: identified as party: %d\n", *id);
@@ -94,12 +115,16 @@ void Node::NewMsg(char* msg, unsigned int len, struct sockaddr_in* from) {
 		printf("Node:: received ALL_IDENTIFIED from %d\n",_clientsmap[from]);
 		_num_parties_identified++;
 		if(_num_parties_identified == _numparties-1) {
-			printf("Node:: received ALL_IDENTIFIED from ALL\n",_clientsmap[from]);
+			printf("Node:: received ALL_IDENTIFIED from ALL\n");
 			_updatable->NodeReady();
 		}
 		return;
 	}
-	_updatable->NewMessage(_clientsmap[from], msg, len );
+	_updatable->NewMessage(_clientsmap[from], message);
+#ifdef DEBUG_COMM
+	printf("finished with %d bytes at 0x%x\n", len, msg);
+	phex(msg, 4);
+#endif
 }
 
 void Node::ClientsConnected() {
@@ -109,6 +134,7 @@ void Node::ClientsConnected() {
 void Node::NodeAborted(struct sockaddr_in* from)
 {
 	printf("Node:: party %d has aborted\n",_clientsmap[from]);
+	Stop();
 }
 
 void Node::ConnectedToServers() {
@@ -117,25 +143,43 @@ void Node::ConnectedToServers() {
 	_identify();
 }
 
-void Node::Send(int to, const char* msg, unsigned int len) {
+void Node::Send(int to, SendBuffer& msg) {
 	int new_recipient = to>_id?to-1:to;
-	//printf("Node:: new_recipient=%d\n",new_recipient);
-	_client->Send(new_recipient, msg, len);
+#ifdef DEBUG_COMM
+	printf("Node:: new_recipient=%d\n",new_recipient);
+	printf("Send %d bytes at 0x%x\n", msg.size(), msg.data());
+	phex(msg.data(), 4);
+#endif
+	_client->Send(new_recipient, msg);
 }
 
-void Node::Broadcast(const char* msg, unsigned int len) {
-	_client->Broadcast(msg, len);
+void Node::Broadcast(SendBuffer& msg) {
+#ifdef DEBUG_COMM
+	printf("Broadcast %d bytes at 0x%x\n", msg.size(), msg.data());
+	phex(msg.data(), 4);
+#endif
+	_client->Broadcast(msg);
 }
-void Node::Broadcast2(const char* msg, unsigned int len) {
-	_client->Broadcast2(msg, len);
+void Node::Broadcast2(SendBuffer& msg) {
+#ifdef DEBUG_COMM
+	printf("Broadcast2 %d bytes at 0x%x\n", msg.size(), msg.data());
+	phex(msg.data(), 4);
+#endif
+	_client->Broadcast2(msg);
 }
 
 void Node::_identify() {
-	char* msg = new char[strlen(ID_HDR)+sizeof(_id)];
+	char* msg = id_msg;
 	strncpy(msg, ID_HDR, strlen(ID_HDR));
 	strncpy(msg+strlen(ID_HDR), (const char *)&_id, sizeof(_id));
 	//printf("Node:: identifying myself:\n");
-	_client->Broadcast(msg,strlen(ID_HDR)+4);
+	SendBuffer buffer;
+	buffer.serialize(msg, strlen(ID_HDR)+4);
+#ifdef DEBUG_COMM
+	cout << "message for identification:";
+	phex(buffer.data(), 4);
+#endif
+	_client->Broadcast(buffer);
 }
 
 void Node::_parse_map(const char* netmap_file, int num_parties) {
@@ -165,11 +209,27 @@ void Node::_parse_map(const char* netmap_file, int num_parties) {
 		for(int i=0; i<_numparties; i++) {
 			if(_id == i) {
 				netmap >> _ip >> _port;
-				//printf("Node:: my address: %s:%d\n", _ip.c_str(),_port);
+#ifdef DEBUG_NETMAP
+				printf("Node:: my address: %s:%d\n", _ip.c_str(),_port);
+#endif
 				continue;
 			}
 			netmap >> _endpoints[j].ip >> _endpoints[j].port;
+#ifdef DEBUG_NETMAP
+				printf("Node:: other address (%d): %s:%d\n", j,
+						_endpoints[j].ip.c_str(), _endpoints[j].port);
+#endif
 			j++;
 		}
+	}
+}
+
+void Node::print_waiting()
+{
+	for (unsigned i = 0; i < _server->timers.size(); i++)
+	{
+		cout << "Waited " << _server->timers[i].elapsed()
+				<< " seconds for client "
+				<< _clientsmap[_server->get_client_addr(i)] << endl;
 	}
 }

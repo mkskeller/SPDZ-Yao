@@ -1,8 +1,8 @@
+// (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
+
 /*
  * utils.cpp
  *
- *  Created on: Jan 31, 2016
- *      Author: bush
  */
 
 
@@ -21,12 +21,9 @@ void fill_message_type(void* buffer, MSG_TYPE type)
 	memcpy(buffer, &type, sizeof(MSG_TYPE));
 }
 
-void fill_message_type(vector<char>& buffer, MSG_TYPE type)
+void fill_message_type(SendBuffer& buffer, MSG_TYPE type)
 {
-	// compatibility
-	buffer.resize(buffer.size() + 4);
-	char* start = (char*)&type;
-	copy(start, start + sizeof(MSG_TYPE), buffer.end() - 4);
+	buffer.serialize(type);
 }
 
 

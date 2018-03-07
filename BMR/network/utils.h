@@ -1,8 +1,8 @@
+// (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
+
 /*
  * utils.h
  *
- *  Created on: Jan 31, 2016
- *      Author: bush
  */
 
 #ifndef NETWORK_TEST_UTILS_H_

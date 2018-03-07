@@ -1,3 +1,5 @@
+// (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
+
 
 #include <stdio.h>
 #include <errno.h>
@@ -9,19 +11,21 @@
 #include <boost/thread.hpp>
 #include <iostream>
 #include <fstream>
+#include <vector>
 
 #include "Server.h"
 
-
 /* Opens server socket for listening - not yet accepting */
 Server::Server(int port, int expected_clients, ServerUpdatable* updatable, unsigned int max_message_size)
-	:_port(port),
+	:starter(0),
 	 _expected_clients(expected_clients),
+	 _port(port),
 	 _updatable(updatable),
 	 _max_msg_sz(max_message_size)
 {
 	_clients = new int[expected_clients]();
 	_clients_addr = new struct sockaddr_in[expected_clients]();
+	timers.resize(expected_clients);
 
 	_servfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (-1 == _servfd)
@@ -41,16 +45,21 @@ Server::Server(int port, int expected_clients, ServerUpdatable* updatable, unsig
 		printf("Server:: Error listen: \n%s\n",strerror(errno));
 
 
-	new boost::thread(&Server::_start_server, this);
+	starter = new boost::thread(&Server::_start_server, this);
 }
 
 Server::~Server() {
+#ifdef DEBUG_COMM
 	printf("Server:: Server being deleted\n");
+#endif
 	close(_servfd);
 	for (int i=0; i<_expected_clients; i++)
 		close(_clients[i]);
-	delete (_clients);
-	delete (_clients_addr);
+	delete[] (_clients);
+	delete[] (_clients_addr);
+	delete starter;
+	for (unsigned i = 0; i < listeners.size(); i++)
+		delete listeners[i];
 }
 
 void Server::_start_server() {
@@ -64,8 +73,10 @@ void Server::_start_server() {
         	printf("Server:: accept: error in connecting socket\n%s\n",strerror(errno));
         } else {
 			printf("Server:: Incoming connection from %s:%d\n",inet_ntoa(_clients_addr[i].sin_addr), ntohs(_clients_addr[i].sin_port));
-			setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &BUFFER_SIZE, sizeof(BUFFER_SIZE));
-			boost::thread* listener = new boost::thread(&Server::_listen_to_client, this, i);
+			// Using the following disables the automatic buffer size (ipv4.tcp_rmem)
+			// in favour of the core.rmem_max, which is worse.
+			//setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &NETWORK_BUFFER_SIZE, sizeof(NETWORK_BUFFER_SIZE));
+			listeners.push_back(new boost::thread(&Server::_listen_to_client, this, i));
         }
 	}
 
@@ -73,23 +84,32 @@ void Server::_start_server() {
 }
 
 void Server::_listen_to_client(int id){
-	int msg_len = 0;
+	size_t msg_len = 0;
 	int n_recv = 0;
-	unsigned int total_received;
-	unsigned int remaining;
-	char *msg;
+	size_t total_received;
+	size_t remaining;
+	ReceivedMsg msg;
+#ifdef DEBUG_FLEXBUF
+	cout << "msg from " << id << " stored at " << &msg << endl;
+#endif
 	while (true) {
-		n_recv = recv(_clients[id], &msg_len, LENGTH_FIELD, MSG_WAITALL);
-		if (!_handle_recv_len(id, n_recv,LENGTH_FIELD))
+		timers[id].start();
+		n_recv = recv(_clients[id], &msg_len, sizeof(msg_len), MSG_WAITALL);
+		timers[id].stop();
+#ifdef DEBUG_COMM
+		cout << "message of size " << msg_len << " coming in from " << id << endl;
+#endif
+		msg.resize(msg_len);
+		if (!_handle_recv_len(id, n_recv, sizeof(msg_len)))
 			return;
 //		printf("Server:: waiting for a message of len = %d\n", msg_len);
-		msg = new char[msg_len];
-		assert(msg != NULL);
 		total_received = 0;
 		remaining = 0;
 		while (total_received != msg_len) {
 			remaining = (msg_len-total_received)>_max_msg_sz ? _max_msg_sz : (msg_len-total_received);
-			n_recv = recv(_clients[id], msg+total_received, remaining, NULL /* MSG_WAITALL*/);
+			timers[id].start();
+			n_recv = recv(_clients[id], msg.data()+total_received, remaining, 0 /* MSG_WAITALL*/);
+			timers[id].stop();
 //			printf("n_recv = %d\n", n_recv);
 			if (!_handle_recv_len(id, n_recv,remaining)) {
 				printf("returning\n");
@@ -99,19 +119,21 @@ void Server::_listen_to_client(int id){
 //			printf("total_received = %d\n", total_received);
 		}
 //		printf("Server:: received %d: \n", msg_len);
-		_updatable->NewMsg(msg, msg_len, &_clients_addr[id]);
+		_updatable->NewMsg(msg, &_clients_addr[id]);
 	}
 	printf("stop listenning to %d\n", id);
 }
 
-bool Server::_handle_recv_len(int id, unsigned int actual_len, unsigned int expected_len) {
+bool Server::_handle_recv_len(int id, size_t actual_len, size_t expected_len) {
 //	printf("Server:: received msg from %d len = %u\n",id, actual_len);
 	if (actual_len == 0) {
+#ifdef DEBUG_COMM
 		printf("Server:: [%d]: Error: n_recv==0 Connection closed\n", id);
+#endif
 		_updatable->NodeAborted(&_clients_addr[id]);
 		return false;
 //		exit(1);
-	} else if (actual_len == -1) {
+	} else if (actual_len == -1U) {
 		printf("Server:: [%d]: Error: n_recv==-1. \"%s\"\n",id, strerror(errno));
 		_updatable->NodeAborted(&_clients_addr[id]);
 		return false;
@@ -120,4 +142,5 @@ bool Server::_handle_recv_len(int id, unsigned int actual_len, unsigned int expe
 //		printf("Server:: [%d]: Error: n_recv < %d; n_recv=%d; \"%d\"\n",id, expected_len, actual_len,strerror(errno));
 		return true;
 	}
+	return true;
 }

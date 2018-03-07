@@ -1,8 +1,8 @@
+// (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
+
 /*
  * Key.h
  *
- *  Created on: Oct 27, 2015
- *      Author: marcel
  */
 
 #ifndef COMMON_INC_KEY_H_
@@ -13,7 +13,7 @@
 #include <smmintrin.h>
 #include <string.h>
 
-#include "proto_utils.h"
+#include "Tools/FlexBuffer.h"
 
 using namespace std;
 
@@ -23,19 +23,61 @@ class Key {
 public:
 	__m128i r;
 
-	Key() : r(_mm_set1_epi64x(0)) {}
-	Key(long long a) : r(_mm_set1_epi64x(a)) {}
-	Key(const Key& other) {r= other.r;}
+	Key() {}
+	Key(long long a) : r(_mm_cvtsi64_si128(a)) {}
+	Key(long long a, long long b) : r(_mm_set_epi64x(a, b)) {}
+	Key(__m128i r) : r(r) {}
+//	Key(const Key& other) {r= other.r;}
 
-	Key& operator=(const Key& other);
+//	Key& operator=(const Key& other);
 	bool operator==(const Key& other);
+	bool operator!=(const Key& other) { return !(*this == other); }
 
 	Key& operator-=(const Key& other);
 	Key& operator+=(const Key& other);
+
+	Key operator^(const Key& other) const { return r ^ other.r; }
+	Key operator^=(const Key& other) { r ^= other.r; return *this; }
+
+	void serialize(SendBuffer& output) const { output.serialize(r); }
+	void serialize_no_allocate(SendBuffer& output) const { output.serialize_no_allocate(r); }
+
+	bool get_signal() { return _mm_cvtsi128_si64(r) & 1; }
+
+	template <class T>
+	T get() const;
 };
 
 ostream& operator<<(ostream& o, const Key& key);
 ostream& operator<<(ostream& o, const __m128i& x);
+
+
+inline bool Key::operator==(const Key& other) {
+    __m128i neq = _mm_xor_si128(r, other.r);
+    return _mm_test_all_zeros(neq,neq);
+}
+
+inline Key& Key::operator-=(const Key& other) {
+    r ^= other.r;
+    return *this;
+}
+
+inline Key& Key::operator+=(const Key& other) {
+    r ^= other.r;
+    return *this;
+}
+
+template <>
+inline unsigned long Key::get() const
+{
+	return _mm_cvtsi128_si64(r);
+}
+
+template <>
+inline __m128i Key::get() const
+{
+	return r;
+}
 
 
 #else //__PRIME_FIELD__ is defined

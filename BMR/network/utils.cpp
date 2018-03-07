@@ -1,8 +1,8 @@
+// (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
+
 /*
  * utils.cpp
  *
- *  Created on: Jan 31, 2016
- *      Author: bush
  */
 
 
@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "utils.h"
 
@@ -22,7 +23,7 @@ void fill_random(void* buffer, unsigned int length)
 }
 
 char cs(char* msg, unsigned int len, char result) {
-	for(int i = 0; i < len; i++)
+	for(size_t i = 0; i < len; i++)
 	      result += msg[i];
 	return result;
 }

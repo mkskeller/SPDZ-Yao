@@ -1,8 +1,8 @@
+// (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
+
 /*
  * Node.h
  *
- *  Created on: Jan 27, 2016
- *      Author: bush
  */
 
 #ifndef NETWORK_NODE_H_
@@ -11,10 +11,13 @@
 #include <string>
 #include <map>
 #include <atomic>
+#include <vector>
 
 #include "common.h"
 #include "Client.h"
 #include "Server.h"
+
+#include "Tools/FlexBuffer.h"
 
 class Server;
 class Client;
@@ -24,7 +27,7 @@ class ClientUpdatable;
 class NodeUpdatable {
 public:
 	virtual void NodeReady()=0;
-	virtual void NewMessage(int from, char* message, unsigned int len) =0;
+	virtual void NewMessage(int from, ReceivedMsg& msg) =0;
 	virtual void NodeAborted(struct sockaddr_in* from) =0;
 };
 
@@ -34,25 +37,28 @@ typedef void (*msg_id_cb_t)(int from, char* msg, unsigned int len);
 const char ALL_IDENTIFIED[] =  "ALID";
 #define LOOPBACK NULL
 #define LOCALHOST_IP "127.0.0.1"
-#define PORT_BASE (4000)
+#define PORT_BASE (14000)
 
 class Node : public ServerUpdatable, public ClientUpdatable {
 public:
 	Node(const char* netmap_file, int my_id, NodeUpdatable* updatable, int num_parties=0);
 	virtual ~Node();
-	void Send(int to, const char* msg, unsigned int len);
-	void Broadcast(const char* msg, unsigned int len);
-	void Broadcast2(const char* msg, unsigned int len);
+	void Send(int to, SendBuffer& msg);
+	void Broadcast(SendBuffer& msg);
+	void Broadcast2(SendBuffer& msg);
 	inline int NumParties(){return _numparties;}
 	void Start();
+	void Stop();
 //	void Close();
 
 	//derived from ServerUpdateable
-	void NewMsg(char* msg, unsigned int len, struct sockaddr_in* from);
+	void NewMsg(ReceivedMsg& msg, struct sockaddr_in* from);
 	void ClientsConnected();
 	void NodeAborted(struct sockaddr_in* from);
 	//derived from ClientUpdatable
 	void ConnectedToServers();
+
+	void print_waiting();
 
 private:
 	void _parse_map(const char* netmap_file, int num_parties);
@@ -74,6 +80,8 @@ private:
 	std::map<struct sockaddr_in*,int> _clientsmap;
 	bool* _clients_connected;
 	NodeUpdatable* _updatable;
+
+	char id_msg[strlen(ID_HDR)+sizeof(_id)];
 };
 
 #endif /* NETWORK_NODE_H_ */

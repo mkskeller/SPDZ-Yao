@@ -1,4 +1,4 @@
-// (C) 2018 University of Bristol. See License.txt
+// (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
 
 #ifndef _Instruction
 #define _Instruction
@@ -64,6 +64,8 @@ enum
     JOIN_TAPE = 0x1A,
     CRASH = 0x1B,
     USE_PREP = 0x1C,
+    STARTGRIND = 0x1D,
+    STOPGRIND = 0x1E,
     // Addition
     ADDC = 0x20,
     ADDS = 0x21,
@@ -138,6 +140,7 @@ enum
     EQC = 0x97,
     JMPI = 0x98,
     // Integers
+    BITDECINT = 0x99,
     LDINT = 0x9A,
     ADDINT = 0x9B,
     SUBINT = 0x9C,
