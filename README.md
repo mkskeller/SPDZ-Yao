@@ -4,7 +4,7 @@ This repository contains the code to benchmark ORAM in SPDZ-BMR as used for the 
 
 #### Preface:
 
-This implementation only allows to benchmark the data-dependent phase. The data-independent and function-independent phases are emulated insecurely. The software should be considered an academic prototype, and we will only give advice on rurunning the examples below.
+This implementation only allows to benchmark the data-dependent phase. The data-independent and function-independent phases are emulated insecurely. The software should be considered an academic prototype, and we will only give advice on re-running the examples below.
 
 #### Requirements:
  - GCC (tested with 7.2) or LLVM (tested with 3.8)
