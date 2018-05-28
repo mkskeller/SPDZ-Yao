@@ -1148,7 +1148,7 @@ class TreeORAM(AbstractORAM):
         Program.prog.curr_tape.\
             start_new_basicblock(name='read_and_remove-%d-end' % self.size)
         return [MemValue(v) for v in read_value], MemValue(read_empty)
-    def add(self, entry, state=None, evict=None):
+    def add(self, entry, state=None, evict=True):
         if state is None:
             state = self.state.read()
         #print_reg(cint(0), 'add')
@@ -1160,9 +1160,10 @@ class TreeORAM(AbstractORAM):
                              *(self.value_type(i.read()) for i in entry.x))
         maybe_stop_timer(4)
         #print 'pre-evict', self
-        maybe_start_timer(5)
-        self.evict()
-        maybe_stop_timer(5)
+        if evict:
+            maybe_start_timer(5)
+            self.evict()
+            maybe_stop_timer(5)
         #print 'post-evict', self
     def evict(self):
         #print 'evict root', id(self)
@@ -1604,9 +1605,10 @@ class PackedORAMWithEmpty(AbstractORAM, PackedIndexStructure):
     def _read(self, index):
         res = PackedIndexStructure.__getitem__(self, index)
         return res[1:], 1 - res[0]
-    def access(self, index, new_value, write, new_empty=False):
+    def access(self, index, new_value, write, new_empty=False, evict=True):
         res = PackedIndexStructure.access(self, index, (1 - new_empty,) + \
-                                              tuplify(new_value), write)
+                                              tuplify(new_value), write, \
+                                          evict=evict)
         return res[1:], 1 - res[0]
     def read_and_maybe_remove(self, index):
         return self.read(index), 0

@@ -100,12 +100,12 @@ public:
     int init(const char* netmap_file, int id);
     virtual void reset();
 
+    virtual party_id_t get_id() { return -1; }
+
     gate_id_t new_gate();
     void next_gate(GarbledGate& gate);
     gate_id_t next_gate(int skip) { return gate_counter2 += skip; }
     size_t get_garbled_tbl_size() { return garbled_tbl_size; }
-
-    void input(Register& reg, party_id_t from);
 
     SendBuffer& get_buffer(MSG_TYPE type);
 

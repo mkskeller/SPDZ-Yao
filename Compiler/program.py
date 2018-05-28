@@ -45,7 +45,7 @@ class Program(object):
         self.param = param
         self.bit_length = BIT_LENGTHS[param]
         print 'Default bit length:', self.bit_length
-        self.security = STAT_SEC[param]
+        self.security = 40
         print 'Default security parameter:', self.security
         self.galois_length = int(options.galois)
         print 'Galois length:', self.galois_length
@@ -384,6 +384,11 @@ class Program(object):
     def set_security(self, security):
         self.security = security
         print 'Changed statistical security for comparison etc. to', security
+
+    def optimize_for_gc(self):
+        from Compiler.GC.instructions import *
+        self.to_merge = [ldmsdi, stmsdi, ldmsd, stmsd, stmsdci, xors, andrs]
+        self.stop_class = type(None)
 
 class Tape:
     """ A tape contains a list of basic blocks, onto which instructions are added. """

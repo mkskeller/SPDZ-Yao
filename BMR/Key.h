@@ -42,7 +42,10 @@ public:
 	void serialize(SendBuffer& output) const { output.serialize(r); }
 	void serialize_no_allocate(SendBuffer& output) const { output.serialize_no_allocate(r); }
 
-	bool get_signal() { return _mm_cvtsi128_si64(r) & 1; }
+	bool get_signal() const { return _mm_cvtsi128_si64(r) & 1; }
+	void set_signal(bool signal);
+
+	Key doubling(int i) const;
 
 	template <class T>
 	T get() const;
@@ -77,6 +80,17 @@ template <>
 inline __m128i Key::get() const
 {
 	return r;
+}
+
+inline void Key::set_signal(bool signal)
+{
+	r &= ~_mm_cvtsi64x_si128(1);
+	r ^= _mm_cvtsi64x_si128(signal);
+}
+
+inline Key Key::doubling(int i) const
+{
+	return _mm_sllv_epi64(r, _mm_set_epi64x(i, i));
 }
 
 

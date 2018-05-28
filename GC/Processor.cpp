@@ -14,6 +14,9 @@ using namespace std;
 #include "Secret.h"
 #include "Access.h"
 
+#include "Yao/YaoGarbleWire.h"
+#include "Yao/YaoEvalWire.h"
+
 namespace GC
 {
 
@@ -51,6 +54,14 @@ void Processor<T>::reset(const Program<T>& program)
     C.resize(program.num_reg(CBIT), "registers");
     I.resize(program.num_reg(INT), "registers");
     machine.reset(program);
+}
+
+template<class T>
+void GC::Processor<T>::open_input_file(const string& name)
+{
+    cout << "opening " << name << endl;
+    input_file.open(name);
+    input_file.exceptions(ios::badbit | ios::eofbit);
 }
 
 template <class T>
@@ -113,10 +124,17 @@ void GC::Processor<T>::store_dynamic_indirect(const vector<int>& args)
     complexity += accesses.size() / 2 * T::default_length;
 }
 
-void check_args(const vector<int>& args, int n)
+template <class T>
+int GC::Processor<T>::check_args(const vector<int>& args, int n)
 {
     if (args.size() % n != 0)
         throw runtime_error("invalid number of arguments");
+    int total = 0;
+    for (size_t i = 0; i < args.size(); i += n)
+    {
+        total += args[i];
+    }
+    return total;
 }
 
 template<class T>
@@ -133,7 +151,8 @@ template <class T>
 void Processor<T>::xors(const vector<int>& args)
 {
     check_args(args, 4);
-    for (size_t i = 0; i < args.size(); i += 4)
+    size_t n_args = args.size();
+    for (size_t i = 0; i < n_args; i += 4)
     {
         S[args[i+1]].xor_(args[i], S[args[i+2]], S[args[i+3]]);
 #ifndef FREE_XOR
@@ -150,6 +169,19 @@ void Processor<T>::andrs(const vector<int>& args)
     {
         S[args[i+1]].andrs(args[i], S[args[i+2]], S[args[i+3]]);
         complexity += args[i];
+    }
+}
+
+template <class T>
+void Processor<T>::input(const vector<int>& args)
+{
+    check_args(args, 3);
+    for (size_t i = 0; i < args.size(); i += 3)
+    {
+        S[args[i+2]] = T::input(args[i] + 1, input_file, args[i+1]);
+#ifdef DEBUG_INPUT
+        cout << "input to " << args[i+2] << "/" << &S[args[i+2]] << endl;
+#endif
     }
 }
 
@@ -171,6 +203,15 @@ void Processor<T>::print_reg_plain(Clear& value)
 }
 
 template <class T>
+void Processor<T>::print_reg_signed(unsigned n_bits, Clear& value)
+{
+    unsigned n_shift = 0;
+    if (n_bits > 1)
+        n_shift = sizeof(value.get()) * 8 - n_bits;
+    T::out << dec << (value.get() << n_shift >> n_shift) << flush;
+}
+
+template <class T>
 void Processor<T>::print_chr(int n)
 {
     T::out << (char)n << flush;
@@ -187,5 +228,7 @@ template class Processor< Secret<PRFRegister> >;
 template class Processor< Secret<EvalRegister> >;
 template class Processor< Secret<GarbleRegister> >;
 template class Processor< Secret<RandomRegister> >;
+template class Processor< Secret<YaoGarbleWire> >;
+template class Processor< Secret<YaoEvalWire> >;
 
 } /* namespace GC */

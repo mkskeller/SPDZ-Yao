@@ -1,8 +1,6 @@
 # (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
 
-program.options.merge_opens = False
-
-from Compiler.GC.types import sbits, sbit, cbits
+program.optimize_for_gc()
 
 def test(a, b, value_type=None):
     try:
@@ -35,7 +33,7 @@ test(sbit(1).if_else(1, 2), 1)
 test(sbit(0).if_else(2, 1), 1)
 test(sbit(1).if_else(2, 1), 2)
 
-test(sbits.compose((sbits(2), sbits(1, n=2)), 2), 6)
+test(sbits.compose((sbits(2, n=2), sbits(1, n=2)), 2), 6)
 
 x = MemValue(sbits(1234))
 program.curr_tape.start_new_basicblock()
@@ -67,3 +65,8 @@ b = sbits.get_random_bit()
 test(b * (1 - b), 0)
 bits = [sbits.get_random_bit() for i in range(40)]
 print_ln('random: %s', sbits.bit_compose(bits).reveal())
+
+k = 41
+a = int(2.9142 * 2**k)
+alpha = sbitint.get_type(2 * k)(a)
+test(sbits.bit_compose((alpha >> 64).bit_decompose()[:64]), 0)

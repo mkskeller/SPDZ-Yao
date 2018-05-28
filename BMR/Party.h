@@ -10,6 +10,8 @@
 
 #include <mutex>
 #include <boost/atomic.hpp>
+#include <sys/sysinfo.h>
+
 #include "Register.h"
 #include "GarbledGate.h"
 #include "network/Node.h"
@@ -31,7 +33,7 @@ class BooleanCircuit;
 #ifndef N_EVAL_THREADS
 // Default Intel desktop processor has 8 half cores.
 // This is beneficial if only one AES available per full core.
-#define N_EVAL_THREADS (8)
+#define N_EVAL_THREADS (get_nprocs())
 #endif
 
 
@@ -61,9 +63,6 @@ protected:
 //	int _num_evaluation_threads;
 	struct timeval _start_online_net, _end_online_net;
 
-	vector<char> input_masks;
-	vector<char>::iterator input_mask;
-
 	Timer online_timer;
 
 	Key delta;
@@ -81,6 +80,7 @@ protected:
 	virtual void _check_evaluate() = 0;
 
 	virtual void mask_output(ReceivedMsg& msg) = 0;
+	virtual void mask_input(ReceivedMsg& msg) = 0;
 
 	void done();
 
@@ -109,6 +109,9 @@ private:
 	vector<GarbledGate> _garbled_tbl;
 
 	vector<char> _input;
+
+	vector<char> input_masks;
+	vector<char>::iterator input_mask;
 
 	SendBuffer _external_values_msg;
 	int _num_externals_msg_received;
@@ -159,6 +162,7 @@ private:
 	void start_online_round();
 
 	void mask_output(ReceivedMsg& msg);
+	void mask_input(ReceivedMsg& msg);
 
 	int get_n_inputs();
 };
@@ -177,10 +181,11 @@ class ProgramParty : public BaseParty
 	size_t garbled_storage;
 	vector<size_t> spdz_counters;
 
-	Worker<AndJob> eval_threads[N_EVAL_THREADS];
-	AndJob and_jobs[N_EVAL_THREADS];
+	Worker<AndJob>* eval_threads;
+	vector<AndJob> and_jobs;
 
 	ReceivedMsgStore output_masks_store;
+	ReceivedMsgStore input_masks_store;
 
 	GC::Memory< GC::Secret<EvalRegister>::DynamicType > dynamic_memory;
 	GC::Machine< GC::Secret<EvalRegister> > machine;
@@ -212,6 +217,7 @@ class ProgramParty : public BaseParty
 	void start_online_round();
 
 	void mask_output(ReceivedMsg& msg) { output_masks_store.push(msg); }
+	void mask_input(ReceivedMsg& msg) { input_masks_store.push(msg); }
 
 public:
 	static ProgramParty* singleton;
@@ -220,6 +226,7 @@ public:
 	ReceivedMsgStore garbled_circuits;
 
 	ReceivedMsg output_masks;
+	ReceivedMsg input_masks;
 
 	MAC_Check<gf2n>* MC;
 	Player* P;
@@ -233,8 +240,6 @@ public:
 	~ProgramParty();
 
 	void reset();
-
-	void input_value(party_id_t from, char value);
 
 	void get_spdz_wire(SpdzOp op, SpdzWire& spdz_wire);
 

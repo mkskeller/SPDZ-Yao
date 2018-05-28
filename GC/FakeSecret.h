@@ -16,6 +16,7 @@
 #include "Math/gf2n.h"
 
 #include <random>
+#include <fstream>
 
 namespace GC
 {
@@ -44,6 +45,12 @@ public:
     template <class T>
     static void andrs(T& processor, const vector<int>& args)
     { processor.andrs(args); }
+    template <class T>
+    static void inputb(T& processor, const vector<int>& args)
+    { processor.input(args); }
+
+    static FakeSecret input(int from, ifstream& input_file, int n_bits);
+    static FakeSecret input(int from, const int128& input, int n_bits);
 
     FakeSecret() : a(0) {}
     FakeSecret(const Integer& x) : a(x.get()) {}
@@ -67,9 +74,12 @@ public:
     void xor_(int n, const FakeSecret& x, const T& y) { (void)n; a = x.a ^ y.a; }
     void andrs(int n, const FakeSecret& x, const FakeSecret& y) { (void)n; a = x.a * y.a; }
 
+
     void random_bit() { a = random() % 2; }
 
     void reveal(Clear& x) { x = a; }
+
+    int size() { return -1; }
 };
 
 } /* namespace GC */

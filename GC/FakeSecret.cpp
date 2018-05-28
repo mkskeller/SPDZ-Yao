@@ -55,4 +55,22 @@ void FakeSecret::store_clear_in_dynamic(Memory<DynamicType>& mem,
 		mem[access.address] = access.value;
 }
 
+FakeSecret FakeSecret::input(int from, ifstream& input_file, int n_bits)
+{
+	long long int in;
+	input_file >> in;
+	return input(from, in, n_bits);
+}
+
+FakeSecret FakeSecret::input(int from, const int128& input, int n_bits)
+{
+	(void)from;
+	(void)n_bits;
+	FakeSecret res;
+	res.a = ((__uint128_t)input.get_upper() << 64) + input.get_lower();
+	if (res.a > ((__uint128_t)1 << n_bits))
+		throw out_of_range("input too large");
+	return res;
+}
+
 } /* namespace GC */

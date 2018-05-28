@@ -15,13 +15,6 @@
 
 #include "utils.h"
 
-void fill_random(void* buffer, unsigned int length)
-{
-	int nullfd = open("/dev/urandom", O_RDONLY);
-	read(nullfd, (char*)buffer, length);
-	close(nullfd);
-}
-
 char cs(char* msg, unsigned int len, char result) {
 	for(size_t i = 0; i < len; i++)
 	      result += msg[i];

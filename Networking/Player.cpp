@@ -230,6 +230,26 @@ void Player::setup_sockets(const vector<string>& names,const vector<int>& ports,
 }
 
 
+void Player::send_long(int i, long a) const
+{
+  send(sockets[i], (octet*)&a, sizeof(long));
+}
+
+long Player::receive_long(int i) const
+{
+  long res;
+  receive(sockets[i], (octet*)&res, sizeof(long));
+  return res;
+}
+
+long Player::peek_long(int i) const
+{
+  long res;
+  recv(sockets[i], &res, sizeof(res), MSG_PEEK);
+  return res;
+}
+
+
 void Player::send_to(int player,const octetStream& o,bool donthash) const
 { 
   TimeScope ts(comm_stats["Sending directly"].add(o));
@@ -261,6 +281,13 @@ void Player::receive_player(int i,octetStream& o,bool donthash) const
   o.Receive(sockets[i]);
   if (!donthash)
     { blk_SHA1_Update(&ctx,o.get_data(),o.get_length()); }
+}
+
+void Player::receive_player(int i, FlexBuffer& buffer) const
+{
+  octetStream os;
+  receive_player(i, os, true);
+  buffer = os;
 }
 
 
@@ -319,7 +346,6 @@ void Player::Check_Broadcast() const
     }
   blk_SHA1_Init(&ctx);
 }
-
 
 void Player::wait_for_available(vector<int>& players, vector<int>& result) const
 {

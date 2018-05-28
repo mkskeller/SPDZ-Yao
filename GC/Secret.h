@@ -9,17 +9,29 @@
 #define GC_SECRET_H_
 
 #include "BMR/Register.h"
-#include "BMR/CommonParty.h"
 #include "BMR/AndJob.h"
 
 #include "GC/Clear.h"
 #include "GC/Memory.h"
 #include "GC/Access.h"
+#include "GC/Processor.h"
 
 #include "Math/Share.h"
 
+#include <fstream>
+
 namespace GC
 {
+
+template <class T>
+inline void XOR(T& res, const T& left, const T& right)
+{
+#ifdef FREE_XOR
+    Secret<T>::cast(res).XOR(Secret<T>::cast(left), Secret<T>::cast(right));
+#else
+    Secret<T>::cast(res).op(Secret<T>::cast(left), Secret<T>::cast(right), 0x0110);
+#endif
+}
 
 class AuthValue
 {
@@ -51,7 +63,7 @@ public:
 template <class T>
 class Secret
 {
-    CheckVector<Register> registers;
+    CheckVector<T> registers;
 
     T& get_new_reg();
 
@@ -69,10 +81,11 @@ public:
 
     static typename T::out_type out;
 
-    static T& cast(Register& reg) { return *reinterpret_cast<T*>(&reg); }
-    static const T& cast(const Register& reg) { return *reinterpret_cast<const T*>(&reg); }
+    static T& cast(T& reg) { return *reinterpret_cast<T*>(&reg); }
+    static const T& cast(const T& reg) { return *reinterpret_cast<const T*>(&reg); }
 
     static Secret<T> input(party_id_t from, const int128& input, int n_bits = -1);
+    static Secret<T> input(party_id_t from, ifstream& input_file, int n_bits = -1);
     void random(int n_bits, int128 share);
     void random_bit();
     static Secret<T> reconstruct(const int128& x, int length);
@@ -81,13 +94,15 @@ public:
     { T::store_clear_in_dynamic(mem, accesses); }
     void store(Memory<AuthValue>& mem, size_t address);
     static Secret<T> carryless_mult(const Secret<T>& x, const Secret<T>& y);
-    static void output(Register& reg);
+    static void output(T& reg);
 
     static void load(vector< ReadAccess< Secret<T> > >& accesses, const Memory<SpdzShare>& mem);
     static void store(Memory<SpdzShare>& mem, vector< WriteAccess< Secret<T> > >& accesses);
 
     static void andrs(Processor< Secret<T> >& processor, const vector<int>& args)
     { T::andrs(processor, args); }
+    static void inputb(Processor< Secret<T> >& processor, const vector<int>& args)
+    { T::inputb(processor, args); }
 
     Secret();
     Secret(const Integer& x) { *this = x; }
@@ -105,19 +120,24 @@ public:
     Secret<T> operator+(const Secret<T> x) const;
     Secret<T>& operator+=(const Secret<T> x) { *this = *this + x; return *this; }
 
-    void xor_(int n, const Secret<T>& x, const Secret<T>& y);
+    void xor_(int n, const Secret<T>& x, const Secret<T>& y)
+    {
+        resize_regs(n);
+        for (int i = 0; i < n; i++)
+            XOR<T>(registers[i], x.get_reg(i), y.get_reg(i));
+    }
     void andrs(int n, const Secret<T>& x, const Secret<T>& y);
 
     template <class U>
     void reveal(U& x);
 
     int size() const { return registers.size(); }
-    CheckVector<Register>& get_regs() { return registers; }
-    const CheckVector<Register>& get_regs() const { return registers; }
+    CheckVector<T>& get_regs() { return registers; }
+    const CheckVector<T>& get_regs() const { return registers; }
 
-    const T& get_reg(int i) const;
-    T& get_reg(int i);
-    void resize_regs(int n) { registers.resize(n, T::new_reg()); }
+    const T& get_reg(int i) const { return *reinterpret_cast<const T*>(&registers.at(i)); }
+    T& get_reg(int i) { return *reinterpret_cast<T*>(&registers.at(i)); }
+    void resize_regs(int n);
 };
 
 template <class T>

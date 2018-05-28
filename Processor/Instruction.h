@@ -91,6 +91,7 @@ enum
     MODCI = 0x37,
     LEGENDREC = 0x38,
     DIGESTC = 0x39,
+    INV2M = 0x3a,
     // Open
     STARTOPEN = 0xA0,
     STOPOPEN = 0xA1,
@@ -165,8 +166,8 @@ enum
     PRINTCHRINT = 0xBA,
     PRINTSTRINT = 0xBB,
     PRINTFLOATPLAIN = 0xBC,
-    WRITEFILESHARE = 0xBD,     
-    READFILESHARE = 0xBE,     
+    WRITEFILESHARE = 0xBD,
+    READFILESHARE = 0xBE,
 
     // GF(2^n) versions
     
@@ -283,6 +284,12 @@ struct TempVars {
   // GINPUT and GLDSI
   gf2n rr2,t2,tmp2;
   gf2n xi2;
+  // assign without allocation
+  void assign_ansp(int n)
+  {
+    aa = n;
+    ansp.convert_destroy(aa);
+  }
 };
 
 

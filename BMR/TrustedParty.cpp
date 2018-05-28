@@ -61,9 +61,7 @@ TrustedProgramParty::TrustedProgramParty(int argc, char** argv) :
 		cerr << "Usage: " << argv[0] << " <program> [netmap]" << endl;
 		exit(1);
 	}
-
-	ifstream file((string("Programs/Bytecode/") + argv[1] + "-0.bc").c_str());
-	program.parse(file);
+	program.parse(string(argv[1]) + "-0");
 	processor.reset(program);
 	machine.reset(program);
 	random_processor.reset(program.cast< GC::Secret<RandomRegister> >());
@@ -178,6 +176,15 @@ void TrustedParty::send_input_masks(party_id_t pid)
 	}
 #ifdef DEBUG_ROUNDS
 	cout << "sending " << dec << buffer.size() - 4 << " input masks" << endl;
+#endif
+	_node->Send(pid, buffer);
+}
+
+void TrustedProgramParty::send_input_masks(party_id_t pid)
+{
+	SendBuffer& buffer = msg_input_masks[pid-1];
+#ifdef DEBUG_ROUNDS
+	cout << "sending " << buffer.size() << " input masks to " << pid << endl;
 #endif
 	_node->Send(pid, buffer);
 }
@@ -388,6 +395,12 @@ bool TrustedProgramParty::_fill_keys()
 		spdz_wires[i].resize(get_n_parties());
 	}
 	msg_output_masks = get_buffer(TYPE_MASK_OUTPUT);
+	msg_input_masks.resize(get_n_parties());
+	for (auto& buffer : msg_input_masks)
+	{
+		buffer.clear();
+		fill_message_type(buffer, TYPE_MASK_INPUTS);
+	}
 	return GC::DONE_BREAK == first_phase(program, random_processor, random_machine);
 }
 

@@ -19,6 +19,7 @@ config_mine.py
 *.rej
 *.tmp
 callgrind.out.*
+HOSTS*
 
 # Vim
 .*.swp

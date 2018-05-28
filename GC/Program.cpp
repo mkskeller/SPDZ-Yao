@@ -11,6 +11,9 @@
 
 #include <valgrind/callgrind.h>
 
+#include "Yao/YaoGarbleWire.h"
+#include "Yao/YaoEvalWire.h"
+
 #ifdef MAX_INLINE
 #include "Instruction_inline.h"
 #endif
@@ -48,6 +51,16 @@ void Program<T>::compute_constants()
 }
 
 template <class T>
+void Program<T>::parse(const string& bytecode_name)
+{
+    string filename = "Programs/Bytecode/" + bytecode_name + ".bc";
+    ifstream s(filename.c_str());
+    if (s.bad() or s.fail())
+        throw runtime_error("Cannot open " + filename);
+    parse(s);
+}
+
+template <class T>
 void Program<T>::parse(istream& s)
 {
     p.resize(0);
@@ -57,6 +70,8 @@ void Program<T>::parse(istream& s)
     CALLGRIND_STOP_INSTRUMENTATION;
     while (!s.eof())
     {
+        if (s.bad() or s.fail())
+            throw runtime_error("error reading program");
         instr.parse(s, pos);
         p.push_back(instr);
         //cerr << "\t" << instr << endl;
@@ -120,5 +135,7 @@ template class Program< Secret<PRFRegister> >;
 template class Program< Secret<EvalRegister> >;
 template class Program< Secret<GarbleRegister> >;
 template class Program< Secret<RandomRegister> >;
+template class Program< Secret<YaoGarbleWire> >;
+template class Program< Secret<YaoEvalWire> >;
 
 } /* namespace GC */

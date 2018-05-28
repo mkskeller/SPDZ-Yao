@@ -33,6 +33,10 @@ public:
   bigint(const T& x) : mpz_class(x) {}
   bigint(const gfp& x);
 
+  bigint& operator=(int n);
+  bigint& operator=(long n);
+  bigint& operator=(word n);
+
   void allocate_slots(const bigint& x) { *this = x; }
   int get_min_alloc() { return get_mpz_t()->_mp_alloc; }
 
@@ -71,6 +75,24 @@ public:
 
   size_t report_size(ReportType type) const;
 };
+
+inline bigint& bigint::operator=(int n)
+{
+  mpz_class::operator=(n);
+  return *this;
+}
+
+inline bigint& bigint::operator=(long n)
+{
+  mpz_class::operator=(n);
+  return *this;
+}
+
+inline bigint& bigint::operator=(word n)
+{
+  mpz_class::operator=(n);
+  return *this;
+}
 
 
 /**********************************

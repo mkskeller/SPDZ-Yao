@@ -81,6 +81,7 @@ opcodes = dict(
     MODCI = 0x37,
     LEGENDREC = 0x38,
     DIGESTC = 0x39,
+    INV2M = 0x3a,
     GMULBITC = 0x136,
     GMULBITM = 0x137,
     # Open
@@ -159,8 +160,8 @@ opcodes = dict(
     PRINTCHRINT = 0xBA,
     PRINTSTRINT = 0xBB,
     PRINTFLOATPLAIN = 0xBC,
-    WRITEFILESHARE = 0xBD,    
-    READFILESHARE = 0xBE,     
+    WRITEFILESHARE = 0xBD,     
+    READFILESHARE = 0xBE,
     GBITDEC = 0x184,
     GBITCOM = 0x185,
     # Secure socket
@@ -406,7 +407,7 @@ class ImmediateModpAF(IntArgFormat):
     @classmethod
     def check(cls, arg):
         super(ImmediateModpAF, cls).check(arg)
-        if arg >= 2**31 or arg < -2**31:
+        if arg >= 2**32 or arg < -2**32:
             raise ArgumentError(arg, 'Immediate value outside of 32-bit range')
 
 class ImmediateGF2NAF(IntArgFormat):

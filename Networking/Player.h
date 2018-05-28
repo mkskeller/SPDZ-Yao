@@ -17,6 +17,7 @@
 using namespace std;
 
 #include "Tools/octetStream.h"
+#include "Tools/FlexBuffer.h"
 #include "Networking/sockets.h"
 #include "Networking/ServerSocket.h"
 #include "Tools/sha1.h"
@@ -158,11 +159,16 @@ public:
   void send_int(int i,int a)  const    { send(sockets[i],a);    }
   void receive_int(int i,int& a) const { receive(sockets[i],a); }
 
+  void send_long(int i, long a) const;
+  long receive_long(int i) const;
+  long peek_long(int i) const;
+
   // Send an octetStream to all other players 
   //   -- And corresponding receive
   virtual void send_all(const octetStream& o,bool donthash=false) const;
   void send_to(int player,const octetStream& o,bool donthash=false) const;
   virtual void receive_player(int i,octetStream& o,bool donthash=false) const;
+  void receive_player(int i,FlexBuffer& buffer) const;
 
   // exchange data with minimal memory usage
   void exchange(int other, octetStream& o) const;

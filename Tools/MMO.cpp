@@ -28,17 +28,6 @@ void MMO::setIV(octet key[AES_BLK_SIZE])
 
 
 template<int N>
-void MMO::encrypt_and_xor(void* output, const void* input, const octet* key)
-{
-    __m128i in[N], out[N];
-    avx_memcpy(in, input, sizeof(in));
-    ecb_aes_128_encrypt<N>(out, in, key);
-    for (int i = 0; i < N; i++)
-        out[i] = _mm_xor_si128(out[i], in[i]);
-    avx_memcpy(output, out, sizeof(out));
-}
-
-template<int N>
 void MMO::encrypt_and_xor(void* output, const void* input, const octet* key,
         const int* indices)
 {

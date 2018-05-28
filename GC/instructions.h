@@ -47,6 +47,7 @@
     X(XORC, C0.xor_(C1, C2)) \
     X(XORCI, C0.xor_(C1, N)) \
     X(ANDRS, T::andrs(P, EXTRA)) \
+    X(INPUTB, T::inputb(P, EXTRA)) \
     X(ADDC, C0 = C1 + C2) \
     X(ADDCI, C0 = C1 + N) \
     X(MULCI, C0 = C1 * N) \
@@ -74,6 +75,7 @@
     X(REVEAL, S1.reveal(C0)) \
     X(PRINTREG, P.print_reg(R0, N)) \
     X(PRINTREGPLAIN, P.print_reg_plain(C0)) \
+    X(PRINTREGSIGNED, P.print_reg_signed(N, C0)) \
     X(PRINTCHR, P.print_chr(N)) \
     X(PRINTSTR, P.print_str(N)) \
     X(LDINT, I0 = int(N)) \

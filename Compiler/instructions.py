@@ -295,7 +295,7 @@ class reqbl(base.Instruction):
     code = base.opcodes['REQBL']
     arg_format = ['int']
 
-class time(base.Instruction):
+class time(base.IOInstruction):
     r""" Output epoch time. """
     code = base.opcodes['TIME']
     arg_format = []
@@ -446,6 +446,12 @@ class modc(base.Instruction):
 
     def execute(self):
         self.args[0].value = self.args[1].value % self.args[2].value
+
+@base.vectorize
+class inv2m(base.Instruction):
+    __slots__ = []
+    code = base.opcodes['INV2M']
+    arg_format = ['cw','int']
 
 @base.vectorize
 class legendrec(base.Instruction):
@@ -935,6 +941,12 @@ class print_int(base.IOInstruction):
     __slots__ = []
     code = base.opcodes['PRINTINT']
     arg_format = ['ci']
+
+@base.vectorize
+class print_float_plain(base.IOInstruction):
+    __slots__ = []
+    code = base.opcodes['PRINTFLOATPLAIN']
+    arg_format = ['c', 'c', 'c', 'c']
 
 class print_char(base.IOInstruction):
     r""" Print a single character to stdout. """

@@ -131,11 +131,10 @@ void BaseParty::NewMessage(int from, ReceivedMsg& msg)
 #ifdef DEBUG_STEPS
 		printf("TYPE_MASK_INPUTS\n");
 #endif
-		input_masks.insert(input_masks.end(), message + sizeof(MSG_TYPE), message + len);
-#ifdef DEBUG_COMM
-		cout << "got " << dec << input_masks.size() << " input masks" << endl;
+#ifdef DEBUG_INPUT
+		cout << "received " << msg.left() << " input masks" << endl;
 #endif
-		input_mask = input_masks.begin();
+		mask_input(msg);
 		break;
 		}
 	case TYPE_MASK_OUTPUT:
@@ -677,6 +676,15 @@ void Party::mask_output(ReceivedMsg& msg)
 #endif
 }
 
+void Party::mask_input(ReceivedMsg& msg)
+{
+	input_masks.insert(input_masks.end(), msg.data() + sizeof(MSG_TYPE), msg.data() + msg.size());
+#ifdef DEBUG_COMM
+	cout << "got " << dec << input_masks.size() << " input masks" << endl;
+#endif
+	input_mask = input_masks.begin();
+}
+
 void Party::receive_keys(Key* keys) {
 	resize_registers();
 	for (size_t w = 0; w < _W; w++)
@@ -722,10 +730,10 @@ ProgramParty::ProgramParty(int argc, char** argv) :
 	}
 
 	_id = atoi(argv[1]);
-	ifstream file((string("Programs/Bytecode/") + argv[2] + "-0.bc").c_str());
-	program.parse(file);
+	program.parse(string(argv[2]) + "-0");
 	machine.reset(program);
 	processor.reset(program);
+	processor.open_input_file("user_inputs/user_" + to_string(_id - 1) + "_input.txt");
 	prf_machine.reset(*reinterpret_cast<GC::Program<GC::Secret<PRFRegister> >* >(&program));
 	prf_processor.reset(*reinterpret_cast<GC::Program<GC::Secret<PRFRegister> >* >(&program));
 	if (singleton)
@@ -768,6 +776,8 @@ ProgramParty::ProgramParty(int argc, char** argv) :
 	else
 		threshold = 128;
 	cout << "Threshold for multi-threaded evaluation: " << threshold << endl;
+	eval_threads = new Worker<AndJob>[N_EVAL_THREADS];
+	and_jobs.resize(N_EVAL_THREADS);
 }
 
 ProgramParty::~ProgramParty()
@@ -777,6 +787,7 @@ ProgramParty::~ProgramParty()
 	delete P;
 	if (MC)
 		delete MC;
+	delete[] eval_threads;
 	cout << "SPDZ loading: " << spdz_counters[SPDZ_LOAD] << endl;
 	cout << "SPDZ storing: " << spdz_counters[SPDZ_STORE] << endl;
 	cout << "SPDZ wire storage: " << 1e-9 * spdz_storage << " GB" << endl;
@@ -808,8 +819,13 @@ void ProgramParty::load_garbled_circuit()
 		throw runtime_error("no garbled circuit available");
 	if (not output_masks_store.pop(output_masks))
 		throw runtime_error("no output masks available");
+	if (not input_masks_store.pop(input_masks))
+		throw runtime_error("no input masks available");
 #ifdef DEBUG_OUTPUT_MASKS
 	cout << "loaded " << output_masks.left() << " output masks" << endl;
+#endif
+#ifdef DEBUG_INPUT
+    cout << "loaded " << input_masks.left() << " input masks" << endl;
 #endif
 }
 
@@ -874,16 +890,6 @@ void ProgramParty::receive_all_keys(Register& reg, bool external)
 	reg.init(get_n_parties());
 	for (int i = 0; i < get_n_parties(); i++)
 		reg.keys[external][i] = *(keys_for_prf++);
-}
-
-void ProgramParty::input_value(party_id_t from, char value)
-{
-	if (from == _id)
-	{
-		if (value and (1 - value))
-			throw runtime_error("invalid input");
-	}
-	throw not_implemented();
 }
 
 void ProgramParty::receive_spdz_wires(ReceivedMsg& msg)

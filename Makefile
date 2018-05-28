@@ -26,8 +26,9 @@ OT_EXE = ot.x ot-offline.x
 endif
 
 COMMON = $(MATH) $(TOOLS) $(NETWORK) $(AUTH)
-COMPLETE = $(COMMON) $(PROCESSOR) $(FHEOFFLINE) $(TINYOTOFFLINE) $(OT)
-BMR = $(patsubst %.cpp,%.o,$(wildcard BMR/*.cpp BMR/network/*.cpp)) $(COMMON) $(PROCESSOR) $(GC)
+COMPLETE = $(COMMON) $(PROCESSOR) $(FHEOFFLINE) $(TINYOTOFFLINE) $(GC) $(OT)
+YAO = $(patsubst %.cpp,%.o,$(wildcard Yao/*.cpp))
+BMR = $(patsubst %.cpp,%.o,$(wildcard BMR/*.cpp BMR/network/*.cpp)) $(COMMON) $(PROCESSOR) $(GC) $(YAO)
 
 
 LIB = libSPDZ.a
@@ -58,6 +59,8 @@ gen_input: gen_input_f2n.x gen_input_fp.x
 externalIO: client-setup.x bankers-bonus-client.x bankers-bonus-commsec-client.x
 
 bmr: bmr-program-party.x bmr-program-tparty.x
+
+yao: yao-simulate.x yao-player.x
 
 she-offline: Check-Offline.x spdz2-offline.x
 
@@ -102,10 +105,10 @@ gc-emulate.x: $(GC) $(COMMON) $(PROCESSOR) gc-emulate.cpp $(BMR)
 	$(CXX) $(CFLAGS) -o $@ $^ $(LDLIBS) $(BOOST)
 
 bmr-program-party.x: $(BMR) bmr-program-party.cpp
-	$(CXX) $(CFLAGS) -o $@ $^ $(LDLIBS) $(BOOST)
+	$(CXX) $(CFLAGS) -o $@ $^ $(BOOST) $(LDLIBS)
 
 bmr-program-tparty.x: $(BMR) bmr-program-tparty.cpp
-	$(CXX) $(CFLAGS) -o $@ $^ $(LDLIBS) $(BOOST)
+	$(CXX) $(CFLAGS) -o $@ $^ $(BOOST) $(LDLIBS)
 
 bmr-clean:
 	-rm BMR/*.o BMR/*/*.o GC/*.o
@@ -132,6 +135,15 @@ cnc-offline.x: $(COMMON) $(FHEOFFLINE) cnc-offline.cpp
 spdz2-offline.x: $(COMMON) $(FHEOFFLINE) spdz2-offline.cpp
 	$(CXX) $(CFLAGS) -o $@ $^ $(LDLIBS)
 endif
+
+yao-simulate.x: $(YAO) $(BMR) yao-simulate.cpp
+	$(CXX) $(CFLAGS) -o $@ $^ $(LDLIBS) $(BOOST)
+
+yao-player.x: $(YAO) $(BMR) yao-player.cpp
+	$(CXX) $(CFLAGS) -o $@ $^ $(LDLIBS) $(BOOST)
+
+yao-clean:
+	-rm Yao/*.o
 
 clean:
 	-rm */*.o *.o */*.d *.d *.x core.* *.a gmon.out */*/*.o

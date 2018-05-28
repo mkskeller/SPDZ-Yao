@@ -19,6 +19,7 @@
 class BaseTrustedParty : virtual public CommonParty {
 public:
 	vector<ReceivedMsg> prf_outputs;
+	vector<SendBuffer> msg_input_masks;
 
 	BaseTrustedParty();
 	virtual ~BaseTrustedParty() {}
@@ -37,7 +38,7 @@ protected:
 	std::atomic_uint _received_gc_received;
 	std::atomic_uint n_received;
 
-	vector<SendBuffer> msg_keys, msg_input_masks;
+	vector<SendBuffer> msg_keys;
 
 	int randomfd;
 
@@ -130,7 +131,7 @@ private:
 	bool _fill_keys();
 	void _launch_online();
 
-	void send_input_masks(party_id_t pid) { (void)pid; }
+	void send_input_masks(party_id_t pid);
 	void send_output_masks();
 	void garble();
 

@@ -9,6 +9,7 @@
 #include <stdio.h>
 
 #include "Key.h"
+#include "common.h"
 
 #define NO_LAYER (-1)
 

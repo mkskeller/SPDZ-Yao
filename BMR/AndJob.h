@@ -10,6 +10,7 @@
 
 #include "GC/Secret.h"
 #include "Register.h"
+#include "GarbledGate.h"
 
 #include <vector>
 using namespace std;

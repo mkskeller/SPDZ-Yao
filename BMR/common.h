@@ -9,6 +9,7 @@
 #define CIRCUIT_INC_COMMON_H_
 
 #include <string>
+#include <vector>
 
 typedef unsigned long wire_id_t;
 typedef unsigned long gate_id_t;
@@ -32,6 +33,7 @@ public:
 			rep[i] = (int_rep << shift(i)) & 1;
 	}
 	uint8_t operator[](int i) { return rep[i]; }
+	bool call(bool left, bool right) { return rep[2 * left + right]; }
 };
 
 template <class T>

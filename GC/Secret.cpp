@@ -12,6 +12,9 @@
 #include "Secret.h"
 #include "Secret_inline.h"
 
+#include "Yao/YaoGarbleWire.h"
+#include "Yao/YaoEvalWire.h"
+
 namespace GC
 {
 
@@ -37,11 +40,26 @@ ostream& operator<<(ostream& o, const AuthValue& auth_value)
 }
 
 template<class T>
+Secret<T> Secret<T>::input(party_id_t from, ifstream& input_file, int n_bits)
+{
+    long long int in;
+    if (from == CommonParty::s().get_id())
+    {
+        input_file >> in;
+        T::check_input(in, n_bits);
+    }
+    return input(from, in, n_bits);
+}
+
+template<class T>
 Secret<T> Secret<T>::input(party_id_t from, const int128& input, int n_bits)
 {
     Secret<T> res;
     if (n_bits < 0)
         n_bits = default_length;
+#ifdef DEBUG_INPUT
+    cout << "input " << input << endl;
+#endif
     for (int i = 0; i < n_bits; i++)
     {
         res.get_new_reg().input(from, input.get_bit(i));
@@ -50,7 +68,7 @@ Secret<T> Secret<T>::input(party_id_t from, const int128& input, int n_bits)
 #endif
     }
 #ifdef DEBUG_INPUT
-    cout << endl;
+    cout << " input" << endl;
 #endif
     if ((size_t)n_bits != res.registers.size())
     {
@@ -58,6 +76,12 @@ Secret<T> Secret<T>::input(party_id_t from, const int128& input, int n_bits)
     	throw runtime_error("wrong bit length in input()");
     }
 #ifdef DEBUG_INPUT
+	for (auto& reg : res.registers)
+	    cout << (int)reg.get_mask_no_check();
+	cout << " mask " <<  endl;
+	for (auto& reg : res.registers)
+	    cout << (int)reg.get_external_no_check();
+	cout << " ext " << endl;
     int128 a;
     res.reveal(a);
 	cout << " input " << hex << a << "(" << res.size() << ") from " << from
@@ -106,7 +130,11 @@ void Secret<T>::random(int n_bits, int128 share)
 template <class T>
 void Secret<T>::random_bit()
 {
+#ifdef NO_INPUT
+	return random(1, 0);
+#else
     return random(1, CommonParty::s().prng.get_uchar() & 1);
+#endif
 }
 
 template <class T>
@@ -175,7 +203,7 @@ void Secret<T>::store(Memory<SpdzShare>& mem,
 }
 
 template <class T>
-void Secret<T>::output(Register& reg)
+void Secret<T>::output(T& reg)
 {
     cast(reg).output();
 }
@@ -196,7 +224,7 @@ Secret<T> Secret<T>::carryless_mult(const Secret<T>& x, const Secret<T>& y)
     {
         int start = max((size_t)0, i - y.registers.size() + 1);
         int stop = min(i + 1, x.registers.size());
-        Register sum = AND<T>(x.get_reg(start), y.get_reg(i - start));
+        T sum = AND<T>(x.get_reg(start), y.get_reg(i - start));
 #ifdef DEBUG_DYNAMIC2
         output(sum);
         cout << "carryless " << i << " " << start << " " << i - start <<
@@ -207,7 +235,7 @@ Secret<T> Secret<T>::carryless_mult(const Secret<T>& x, const Secret<T>& y)
 #endif
         for (int j = start + 1; j < stop; j++)
         {
-            Register product = AND<T>(x.get_reg(j), y.get_reg(i - j));
+            T product = AND<T>(x.get_reg(j), y.get_reg(i - j));
             sum = XOR<T>(sum, product);
 #ifdef DEBUG_DYNAMIC2
             cout << "carryless " <<
@@ -244,18 +272,6 @@ template <class T>
 Secret<T>::Secret()
 {
 
-}
-
-template<class T>
-T& GC::Secret<T>::get_reg(int i)
-{
-	return *reinterpret_cast<T*>(&registers.at(i));
-}
-
-template<class T>
-const T& GC::Secret<T>::get_reg(int i) const
-{
-	return *reinterpret_cast<const T*>(&registers.at(i));
 }
 
 
@@ -366,7 +382,10 @@ template <class T>
 void Secret<T>::bitdec(Memory<Secret>& S, const vector<int>& regs) const
 {
     if (regs.size() > registers.size())
-        throw out_of_range("not enough bits for bit decomposition");
+        throw out_of_range(
+                "not enough bits for bit decomposition: "
+                        + to_string(regs.size()) + " > "
+                        + to_string(registers.size()));
     for (unsigned int i = 0; i < regs.size(); i++)
     {
         Secret& secret = S[regs[i]];
@@ -380,7 +399,8 @@ template <class U>
 void Secret<T>::reveal(U& x)
 {
 #ifdef DEBUG_OUTPUT
-    cout << "output: ";
+    cout << "revealing " << this << " with min(" << 8 * sizeof(U) << ","
+            << registers.size() << ") bits" << endl;
 #endif
     x = 0;
     for (unsigned int i = 0; i < min(8 * sizeof(U), registers.size()); i++)
@@ -393,7 +413,13 @@ void Secret<T>::reveal(U& x)
 #endif
     }
 #ifdef DEBUG_OUTPUT
-    cout << endl;
+    cout << " output" << endl;
+    for (auto& reg : registers)
+        cout << (int)reg.get_mask_no_check();
+    cout << " mask" << endl;
+    for (auto& reg: registers)
+        cout << (int)reg.get_external_no_check();
+    cout << " ext" << endl;
 #endif
 #ifdef DEBUG_VALUES
     cout << typeid(T).name() << " " << &x << endl;
@@ -405,14 +431,24 @@ void Secret<T>::reveal(U& x)
 #endif
 }
 
+template <class T>
+MAYBE_INLINE void Secret<T>::resize_regs(int n)
+{
+    registers.resize(n, T::new_reg());
+}
+
 template class Secret<EvalRegister>;
 template class Secret<PRFRegister>;
 template class Secret<GarbleRegister>;
 template class Secret<RandomRegister>;
+template class Secret<YaoGarbleWire>;
+template class Secret<YaoEvalWire>;
 
 template void Secret<EvalRegister>::reveal(Clear& x);
 template void Secret<PRFRegister>::reveal(Clear& x);
 template void Secret<GarbleRegister>::reveal(Clear& x);
 template void Secret<RandomRegister>::reveal(Clear& x);
+template void Secret<YaoGarbleWire>::reveal(Clear& x);
+template void Secret<YaoEvalWire>::reveal(Clear& x);
 
 } /* namespace GC */

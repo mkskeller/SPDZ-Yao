@@ -162,6 +162,7 @@ public:
     char get_output() { check_external(); check_mask(); return mask ^ external; }
     char get_output_no_check() { return mask ^ external; }
     const KeyVector& get_garbled_entry() const { return garbled_entry; }
+    const Key& get_garbled_wire(party_id_t i) const { return garbled_entry[i-1]; }
     void print_input(int id);
     void print() const { keys.print(get_id()); }
     void check_external() const;
@@ -192,15 +193,11 @@ public:
 inline BlackHole& endl(BlackHole& b) { return b; }
 inline BlackHole& flush(BlackHole& b) { return b; }
 
-class ProgramRegister : public Register
+class Phase
 {
 public:
 	typedef BlackHole out_type;
 	static const BlackHole out;
-
-	static Register new_reg();
-	static Register tmp_reg() { return new_reg(); }
-	static Register and_reg() { return new_reg(); }
 
 	static void check(const int128& value, word share, int128 mac)
 	{ (void)value; (void)share; (void)mac; }
@@ -222,24 +219,29 @@ public:
 
 	template <class T>
 	static void andrs(T& processor, const vector<int>& args) { processor.andrs(args); }
+	template <class T>
+	static void inputb(T& processor, const vector<int>& args) { processor.input(args); }
 
+	static void check_input(long long in, int n_bits) { (void)in; (void)n_bits; }
 	void input(party_id_t from, char value = -1) { (void)from; (void)value; }
 	void public_input(bool value) { (void)value; }
 	void random() {}
+	void output() {}
+};
+
+class ProgramRegister : public Phase, public Register
+{
+public:
+	static Register new_reg();
+	static Register tmp_reg() { return new_reg(); }
+	static Register and_reg() { return new_reg(); }
+
 	char get_output() { return 0; }
+
+	ProgramRegister(const Register& reg) : Register(reg) {}
 };
 
-class FirstRoundRegister : public ProgramRegister
-{
-public:
-};
-
-class SecondRoundRegister : public ProgramRegister
-{
-public:
-};
-
-class PRFRegister : public FirstRoundRegister
+class PRFRegister : public ProgramRegister
 {
 public:
 	static string name() { return "PRF"; }
@@ -247,6 +249,8 @@ public:
 	template<class T>
 	static void load(vector<GC::ReadAccess<T> >& accesses,
 			const GC::Memory<GC::SpdzShare>& source);
+
+	PRFRegister(const Register& reg) : ProgramRegister(reg) {}
 
 	void op(const ProgramRegister& left, const ProgramRegister& right, Function func);
 	void XOR(const Register& left, const Register& right);
@@ -256,7 +260,7 @@ public:
 	void output();
 };
 
-class EvalRegister : public SecondRoundRegister
+class EvalRegister : public ProgramRegister
 {
 public:
     static string name() { return "Evaluation"; }
@@ -278,6 +282,10 @@ public:
 
 	template <class T>
 	static void andrs(T& processor, const vector<int>& args);
+	template <class T>
+	static void inputb(T& processor, const vector<int>& args);
+
+	EvalRegister(const Register& reg) : ProgramRegister(reg) {}
 
 	void op(const ProgramRegister& left, const ProgramRegister& right, Function func);
 	void XOR(const Register& left, const Register& right);
@@ -290,10 +298,12 @@ public:
 	template <class T>
 	static void store_clear_in_dynamic(GC::Memory<T>& mem,
 			const vector<GC::ClearWriteAccess>& accesses);
+	static void check_input(long long input, int n_bits);
 	void input(party_id_t from, char value = -1);
+	void input_helper(char value, octetStream& os);
 };
 
-class GarbleRegister : public SecondRoundRegister
+class GarbleRegister : public ProgramRegister
 {
 public:
 	static string name() { return "Garbling"; }
@@ -302,14 +312,17 @@ public:
 	static void load(vector<GC::ReadAccess<T> >& accesses,
 			const GC::Memory<GC::SpdzShare>& source);
 
+	GarbleRegister(const Register& reg) : ProgramRegister(reg) {}
+
 	void op(const Register& left, const Register& right, Function func);
 	void XOR(const Register& left, const Register& right);
+        void input(party_id_t from, char value = -1);
 	void public_input(bool value);
 	void random();
 	void output() {}
 };
 
-class RandomRegister : public FirstRoundRegister
+class RandomRegister : public ProgramRegister
 {
 public:
 	static string name() { return "Randomization"; }
@@ -320,6 +333,8 @@ public:
 	template<class T>
 	static void load(vector<GC::ReadAccess<T> >& accesses,
 			const GC::Memory<GC::SpdzShare>& source);
+
+	RandomRegister(const Register& reg) : ProgramRegister(reg) {}
 
 	void randomize();
 

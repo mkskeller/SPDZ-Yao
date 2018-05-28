@@ -33,6 +33,8 @@ opcodes = dict(
     CONVCINT = 0x213,
     REVEAL = 0x214,
     STMSDCI = 0x215,
+    INPUTB = 0x216,
+    PRINTREGSIGNED = 0x220,
 )
 
 class xors(base.Instruction):
@@ -155,6 +157,11 @@ class reveal(base.Instruction):
     code = opcodes['REVEAL']
     arg_format = ['int','cbw','sb']
 
+class inputb(base.DoNotEliminateInstruction, base.VarArgsInstruction):
+    __slots__ = []
+    code = opcodes['INPUTB']
+    arg_format = tools.cycle(['p','int','sbw'])
+
 class print_reg(base.IOInstruction):
     code = base.opcodes['PRINTREG']
     arg_format = ['cb','i']
@@ -164,3 +171,7 @@ class print_reg(base.IOInstruction):
 class print_reg_plain(base.IOInstruction):
     code = base.opcodes['PRINTREGPLAIN']
     arg_format = ['cb']
+
+class print_reg_signed(base.IOInstruction):
+    code = opcodes['PRINTREGSIGNED']
+    arg_format = ['int','cb']

@@ -10,6 +10,9 @@
 #include "GC/Program.h"
 #include "Secret.h"
 
+#include "Yao/YaoGarbleWire.h"
+#include "Yao/YaoEvalWire.h"
+
 namespace GC
 {
 
@@ -41,5 +44,7 @@ template class Machine< Secret<PRFRegister> >;
 template class Machine< Secret<EvalRegister> >;
 template class Machine< Secret<GarbleRegister> >;
 template class Machine< Secret<RandomRegister> >;
+template class Machine< Secret<YaoGarbleWire> >;
+template class Machine< Secret<YaoEvalWire> >;
 
 } /* namespace GC */

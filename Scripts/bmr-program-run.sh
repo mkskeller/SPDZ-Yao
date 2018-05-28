@@ -1,4 +1,12 @@
-#!/bin/sh
+#!/bin/bash
+
+while getopts t: opt; do
+    case $opt in
+	t) threshold=$OPTARG ;;
+    esac
+done
+
+shift $[OPTIND-1]
 
 # (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
 
@@ -28,6 +36,6 @@ done
 
 $prefix ./bmr-program-tparty.x $prog $netmap 2>&1 &> bmr-log/t &
 for i in $(seq $[n_players-1]); do
-    $prefix ./bmr-program-party.x $i $prog $netmap 2>&1 &> bmr-log/$i &
+    $prefix ./bmr-program-party.x $i $prog $netmap $threshold 2>&1 &> bmr-log/$i &
 done
-$prefix ./bmr-program-party.x $n_players $prog $netmap 2>&1 | tee bmr-log/$n_players
+$prefix ./bmr-program-party.x $n_players $prog $netmap $threshold 2>&1 | tee bmr-log/$n_players

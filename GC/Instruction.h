@@ -84,6 +84,9 @@ enum
     CONVCINT = 0x213,
     REVEAL = 0x214,
     STMSDCI = 0x215,
+    INPUTB = 0x216,
+    // don't write
+    PRINTREGSIGNED = 0x220,
 };
 
 } /* namespace GC */

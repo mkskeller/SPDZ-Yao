@@ -237,6 +237,7 @@ void Register::eval(const Register& left, const Register& right, GarbledGate& ga
     phex(gate.input(ext_l, 1), 16);
     printf("right input");
     phex(gate.input(ext_r, 1), 16);
+    unsigned g = gate.id;
 #endif
 
     Key k;
@@ -400,7 +401,7 @@ void Register::garble(const Register& left, const Register& right,
     char maskr =    right.mask;
     char masko =    mask;
 #ifdef DEBUG
-    printf("\ngate %u, leftwire=%u, rightwire=%u, outwire=%u: func=%d%d%d%d, msk_l=%d, msk_r=%d, msk_o=%d\n"
+    printf("\ngate %u, leftwire=%lu, rightwire=%lu, outwire=%lu: func=%d%d%d%d, msk_l=%d, msk_r=%d, msk_o=%d\n"
             , g,gate->_left, gate->_right, gate->_out
             ,func[0],func[1],func[2],func[3], maskl, maskr, masko);
 #endif
@@ -479,10 +480,11 @@ void PRFRegister::op(const ProgramRegister& left, const ProgramRegister& right, 
 
 void PRFRegister::input(party_id_t from, char value)
 {
+	(void)from;
 	(void)value;
 	ProgramParty& party = *ProgramParty::singleton;
 	party.receive_keys(*this);
-	party.input(*this, from);
+	party.store_wire(*this);
 #ifdef DEBUG
 	cout << "(PRF) input from " << from << ":" << endl;
 	keys.print(get_id());
@@ -511,12 +513,158 @@ void PRFRegister::random()
 #endif
 }
 
+void EvalRegister::check_input(long long in, int n_bits)
+{
+	auto test = in >> (n_bits - 1);
+	if (n_bits == 1)
+	{
+		if (not (in == 0 or in == 1))
+			throw runtime_error("input not a bit: " + to_string(in));
+	}
+	else if (not (test == 0 or test == -1))
+	{
+		throw runtime_error(
+				"input too large for a " + std::to_string(n_bits)
+						+ "-bit signed integer: " + to_string(in));
+	}
+}
+
+class InputAccess
+{
+	party_id_t from;
+	size_t n_bits;
+	GC::Secret<EvalRegister>& dest;
+	GC::Processor<GC::Secret<EvalRegister> >& processor;
+	ProgramParty& party;
+
+public:
+	InputAccess(int from, int n_bits, GC::Secret<EvalRegister>& dest,
+			GC::Processor<GC::Secret<EvalRegister> >& processor) :
+			from(from), n_bits(n_bits), dest(dest), processor(processor), party(
+					ProgramParty::s())
+	{
+		if (from > party.get_n_parties() or n_bits > 100)
+			throw runtime_error("invalid input parameters");
+	}
+
+	void prepare_masks(octetStream& os)
+	{
+		dest.resize_regs(n_bits);
+		for (auto& reg : dest.get_regs())
+			party.load_wire(reg);
+		if (from == party.get_id())
+		{
+			long long in;
+			processor.input_file >> in;
+			EvalRegister::check_input(in, n_bits);
+			for (size_t i = 0; i < n_bits; i++)
+			{
+				auto& reg = dest.get_reg(i);
+				reg.input_helper((in >> i) & 1, os);
+			}
+		}
+	}
+
+	void received_masks(vector<octetStream>& oss)
+	{
+		size_t id = party.get_id() - 1;
+		for (auto& reg : dest.get_regs())
+		{
+			if (party.get_id() != from)
+			{
+				char ext;
+				oss[from - 1].unserialize(ext);
+				reg.set_external(ext);
+			}
+			oss[id].serialize(reg.get_garbled_entry()[id]);
+		}
+	}
+
+	void received_labels(vector<octetStream>& oss)
+	{
+		for (auto& reg : dest.get_regs())
+		{
+			for (party_id_t id = 1; id < (size_t)party.get_n_parties() + 1; id++)
+			{
+				Key key;
+				if (id != party.get_id())
+				{
+					oss[id - 1].unserialize(key);
+					reg.set_external_key(id, key);
+				}
+			}
+		}
+	}
+};
+
+template <>
+void EvalRegister::inputb(GC::Processor<GC::Secret<EvalRegister> >& processor,
+		const vector<int>& args)
+{
+	auto& party = ProgramParty::s();
+	vector<octetStream> oss(party.get_n_parties());
+	octetStream& my_os = oss[party.get_id() - 1];
+	vector<InputAccess> accesses;
+	for (size_t j = 0; j < args.size(); j += 3)
+	{
+		accesses.push_back(
+		{ args[j] + 1, args[j + 1], processor.S[args[j + 2]], processor });
+	}
+	for (auto& access : accesses)
+		access.prepare_masks(my_os);
+	party.P->Broadcast_Receive(oss, true);
+	my_os.reset_write_head();
+	for (auto& access : accesses)
+		access.received_masks(oss);
+	party.P->Broadcast_Receive(oss, true);
+	for (auto& access : accesses)
+		access.received_labels(oss);
+}
+
+void EvalRegister::input_helper(char value, octetStream& os)
+{
+	set_mask(ProgramParty::s().input_masks.pop_front());
+	set_external(get_mask() ^ value);
+	os.serialize(get_external());
+}
+
 void EvalRegister::input(party_id_t from, char value)
 {
-	ProgramParty::s().input_value(from, value);
+	auto& party = ProgramParty::s();
+	party.load_wire(*this);
+	octetStream os;
+	if (from == party.get_id())
+	{
+		if (value and (1 - value))
+			throw runtime_error("invalid input");
+		input_helper(value, os);
+		party.P->send_all(os, true);
+	}
+	else
+	{
+		party.P->receive_player(from - 1, os);
+		char ext;
+		os.unserialize(ext);
+		set_external(ext);            
+	}
+	vector<octetStream> oss(party.get_n_parties());
+	size_t id = party.get_id() - 1;
+	oss[id].serialize(garbled_entry[id]);
+#ifdef DEBUG_COMM
+	cout << "send " << garbled_entry[id] << ", "
+			<< oss[id].get_length() << " bytes from " << id << endl;
+#endif
+	party.P->Broadcast_Receive(oss, true);
+	for (size_t i = 0; i < (size_t)party.get_n_parties(); i++)
+	{
+		if (i != id)
+			oss[i].unserialize(garbled_entry[i]);
+	}
+	keys[external] = garbled_entry;
 #ifdef DEBUG
 	cout << "(Input) input from " << from << ":" << endl;
 	keys.print(get_id());
+	cout << garbled_entry << endl;
 #endif
 }
 
@@ -565,11 +713,13 @@ void RandomRegister::input(party_id_t from, char value)
 {
 	(void)value;
 	randomize();
+	auto& party = TrustedProgramParty::s();
+	party.store_wire(*this);
+	party.msg_input_masks[from - 1].push_back(get_mask());
 #ifdef DEBUG
 	cout << "(Random) input from " << from << ":" << endl;
 	keys.print(get_id());
 #endif
-	CommonParty::singleton->input(*this, from);
 }
 
 void RandomRegister::public_input(bool value)
@@ -583,6 +733,13 @@ void RandomRegister::public_input(bool value)
 	}
 	set_mask(0);
 	party.store_wire(*this);
+}
+
+void GarbleRegister::input(party_id_t from, char value)
+{
+    (void)from;
+    (void)value;
+    TrustedProgramParty::s().load_wire(*this);
 }
 
 void GarbleRegister::public_input(bool value)
@@ -672,7 +829,7 @@ void EvalRegister::XOR(const Register& left, const Register& right)
 	garbled_entry = left.get_garbled_entry() ^ right.get_garbled_entry();
 #ifdef DEBUG
 	cout << "Eval XOR *" << get_id() << " = *" << left.get_id() << " ^ *" << right.get_id() << endl;
-	for (int i = 0; i < garbled_entry.size(); i++)
+	for (size_t i = 0; i < garbled_entry.size(); i++)
 		cout << garbled_entry[i] << " = " << left.get_garbled_entry()[i]
 				<< " ^ " << right.get_garbled_entry()[i] << endl;
 #endif
@@ -779,12 +936,12 @@ void EvalRegister::store(GC::Memory<GC::SpdzShare>& mem,
 	{
 		GC::SpdzShare& dest = mem[access.address];
 		dest.assign_zero();
-		const vector<Register>& sources = access.source.get_regs();
+		const vector<EvalRegister>& sources = access.source.get_regs();
 		for (unsigned int i = 0; i < sources.size(); i++)
 		{
 			SpdzWire spdz_wire;
 			party.get_spdz_wire(SPDZ_STORE, spdz_wire);
-			const Register& reg = sources[i];
+			const EvalRegister& reg = sources[i];
 			Share<gf2n> tmp;
 			gf2n ext = (int)reg.get_external();
 			//cout << "ext:" << ext << "/" << (int)reg.get_external() << " " << endl;
@@ -909,7 +1066,7 @@ void EvalRegister::load(vector<GC::ReadAccess< GC::Secret<EvalRegister> > >& acc
 	{
 		const GC::SpdzShare& source = mem[access.address];
 		Share<gf2n> mask;
-		vector<Register>& dests = access.dest.get_regs();
+		vector<EvalRegister>& dests = access.dest.get_regs();
 		for (unsigned int i = 0; i < dests.size(); i++)
 		{
 			spdz_wires.push_back({});
@@ -945,7 +1102,7 @@ void EvalRegister::load(vector<GC::ReadAccess< GC::Secret<EvalRegister> > >& acc
 
 	for (size_t j = 0; j < accesses.size(); j++)
 	{
-		vector<Register>& dests = accesses[j].dest.get_regs();
+		vector<EvalRegister>& dests = accesses[j].dest.get_regs();
 		for (unsigned int i = 0; i < dests.size(); i++)
 		{
 			bool ext = masked[j].get_bit(i);
@@ -961,7 +1118,7 @@ void EvalRegister::load(vector<GC::ReadAccess< GC::Secret<EvalRegister> > >& acc
 	int base = 0;
 	for (auto access : accesses)
 	{
-		vector<Register>& dests = access.dest.get_regs();
+		vector<EvalRegister>& dests = access.dest.get_regs();
 		for (unsigned int i = 0; i < dests.size(); i++)
 			for (int j = 0; j < party.get_n_parties(); j++)
 			{
@@ -1050,7 +1207,7 @@ void KeyTuple<I>::randomize()
 	{
 		CommonParty::s().prng.get_octets((octet*)keys[i].data(), part_size());
 #ifdef DEBUG
-		for (int j = 0; j < keys[i].size(); j++)
+		for (unsigned j = 0; j < keys[i].size(); j++)
 		{
 			keys[i][j] = { 0, (counter << 16) + (i << 8) + j };
 			counter++;

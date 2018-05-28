@@ -12,7 +12,14 @@
 #include "Networking/data.h"
 #include "Math/bigint.h"
 #include "Tools/time-func.h"
+#include "Tools/FlexBuffer.h"
 
+
+void octetStream::reset()
+{
+    data = 0;
+    len = mxlen = ptr = 0;
+}
 
 void octetStream::clear()
 {
@@ -37,16 +44,6 @@ void octetStream::assign(const octetStream& os)
 }
 
 
-void octetStream::swap(octetStream& os)
-{
-  const size_t size = sizeof(octetStream);
-  char tmp[size];
-  memcpy(tmp, this, size);
-  memcpy(this, &os, size);
-  memcpy(&os, tmp, size);
-}
-
-
 octetStream::octetStream(size_t maxlen)
 {
   mxlen=maxlen; len=0; ptr=0;
@@ -61,6 +58,15 @@ octetStream::octetStream(const octetStream& os)
   data=new octet[mxlen];
   memcpy(data,os.data,len*sizeof(octet));
   ptr=os.ptr;
+}
+
+octetStream::octetStream(FlexBuffer& buffer)
+{
+  mxlen = buffer.capacity();
+  len = buffer.size();
+  data = (octet*)buffer.data();
+  ptr = buffer.ptr - buffer.data();
+  buffer.reset();
 }
 
 

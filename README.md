@@ -1,36 +1,30 @@
 (C) 2018 University of Bristol, Bar-Ilan University. See License.txt
 
-This repository contains the code to benchmark ORAM in SPDZ-BMR as used for the [Eurocrypt 2018 paper](https://eprint.iacr.org/2017/981) by Marcel Keller and Avishay Yanay.
+This repository contains code to run computation with Yao's garbled circuits optimized for AES-NI by [Bellare et al.](https://eprint.iacr.org/2013/426).
 
 #### Preface:
 
-This implementation only allows to benchmark the data-dependent phase. The data-independent and function-independent phases are emulated insecurely. The software should be considered an academic prototype, and we will only give advice on re-running the examples below.
+The main purpose of this software is to provide a quick way to benchmark the computation of some programs written in a subset of the SPDZ high-level language (using purely `sint` and `sfix`) with Yao's garbled circuits. Private inputs are not supported.
 
 #### Requirements:
  - GCC (tested with 7.2) or LLVM (tested with 3.8)
  - MPIR library, compiled with C++ support (use flag --enable-cxx when running configure)
  - libsodium library, tested against 1.0.11
- - CPU supporting AES-NI and PCLMUL
+ - CPU supporting AES-NI, PCLMUL and AVX2
  - Python 2.x
  - If using macOS, Sierra or later
 
-#### To compile:
+#### Compile the VM:
 
-1) Edit `CONFIG` or `CONFIG.mine`:
+Run `make yao` (use the flag -j for faster compilation multiple threads).
 
- - Add the following line at the top: `MY_CFLAGS = -DINSECURE`
- - For processors without AVX (e.g., Intel Atom) or for optimization, set `ARCH = -march=<architecture>`.
+#### Compile the circuit:
 
-2) Run `make bmr` (use the flag -j for faster compilation multiple threads). Remember to run `make clean` first after changing `CONFIG` or `CONFIG.mine`.
-
-#### Configure the parameters:
-
-1) Edit `Program/Source/gc_oram.mpc` to change size and to choose Circuit ORAM or linear scan without ORAM.
-2) Run `./compile.py -D gc_oram`.
+Run `./compile.py -D <program>` to compile the `Programs/Source/<program>.mpc`. See `gc_tutorial.mpc` and `gc_fixed_point_tutorial.mpc` for examples.
 
 #### Run the protocol:
 
-- Run everything locally: `Scripts/bmr-program-run.sh gc_oram`.
-- Run on different hosts: `Scripts/bmr-program-run-remote.sh gc_oram <host1> <host2> [...]`
-
-To run with more than two parties, change `CFLAGS = -DN_PARTIES=<n>` in `CONFIG`, and compile again after `make clean`.
+- Run everything locally: `./yao-simulate.x <program>`
+- Run on different hosts:
+  - Garbler: ```./yao-player.x -p 0 <program>```
+  - Evaluator: ```./yao-player.x -p 1 -h <garbler host> <program>```

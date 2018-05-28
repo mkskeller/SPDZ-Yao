@@ -46,6 +46,7 @@ class Program
     Program();
 
     // Read in a program
+    void parse(const string& bytecoode_name);
     void parse(istream& s);
 
     int get_offline_data_used() const { return offline_data_used; }

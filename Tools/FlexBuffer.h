@@ -10,7 +10,7 @@
 
 #include "Tools/avx_memcpy.h"
 #include "Tools/time-func.h"
-
+#include "Tools/octetStream.h"
 #include <stdio.h>
 #include <stdexcept>
 #include <deque>
@@ -19,6 +19,8 @@ using namespace std;
 
 class FlexBuffer
 {
+	friend class octetStream;
+
 protected:
     char* buf, *ptr;
 	size_t len, max_len;
@@ -29,6 +31,7 @@ public:
 	FlexBuffer(const FlexBuffer&);
 	~FlexBuffer() { del(); }
 	void operator=(FlexBuffer& msg);
+	void operator=(octetStream& os);
 	char* data() { return buf; }
 	const char* data() const { return buf; }
 	size_t size() const { return len; }
@@ -40,6 +43,7 @@ class ReceivedMsg : public virtual FlexBuffer
 	friend class ReceivedMsgStore;
 
 public:
+	void operator=(FlexBuffer& msg) { FlexBuffer::operator=(msg); }
 	void reset_head() { ptr = buf; }
 	void resize(size_t new_len);
 	void unserialize(void* output, size_t size);
@@ -56,6 +60,9 @@ public:
 class SendBuffer : public virtual FlexBuffer
 {
 public:
+	void operator=(FlexBuffer& msg) { FlexBuffer::operator=(msg); }
+	char* end() { return buf + len; }
+	void skip(size_t n) { len += n; }
 	void resize(size_t new_len);
 	void resize_copy(size_t new_max_len);
 	void clear() { len = 0; }
@@ -65,9 +72,11 @@ public:
 	void serialize(const T& source) { serialize(&source, sizeof(T)); }
 	void serialize(const void* source, size_t size);
 	void allocate(size_t size);
+	char* allocate_and_skip(size_t size);
 	template <class T>
 	void serialize_no_allocate(const T& source);
 	void serialize_no_allocate(const void* source, size_t size);
+	void send(int socket_num);
 };
 
 class LocalBuffer : public ReceivedMsg, public SendBuffer
@@ -111,6 +120,16 @@ inline void FlexBuffer::operator=(FlexBuffer& msg)
 #endif
         msg.reset();
     }
+}
+
+inline void FlexBuffer::operator=(octetStream& os)
+{
+	del();
+	buf = (char*)os.get_data();
+	ptr = (char*)os.get_data() + os.get_ptr();
+	len = os.get_length();
+	max_len = os.get_max_length();
+	os.reset();
 }
 
 inline void ReceivedMsg::resize(size_t new_len)
@@ -194,6 +213,14 @@ template<class T>
 inline void SendBuffer::serialize_no_allocate(const T& source)
 {
 	serialize_no_allocate(&source, sizeof(T));
+}
+
+inline char* SendBuffer::allocate_and_skip(size_t size)
+{
+	allocate(size);
+	char* res = end();
+	skip(size);
+	return res;
 }
 
 inline void SendBuffer::serialize_no_allocate(const void* source, size_t size)

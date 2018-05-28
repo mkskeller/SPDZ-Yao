@@ -19,25 +19,15 @@
 namespace GC {
 
 template <class T>
-inline void XOR(Register& res, const Register& left, const Register& right)
+inline T XOR(const T& left, const T& right)
 {
-#ifdef FREE_XOR
-    Secret<T>::cast(res).XOR(Secret<T>::cast(left), Secret<T>::cast(right));
-#else
-    Secret<T>::cast(res).op(Secret<T>::cast(left), Secret<T>::cast(right), 0x0110);
-#endif
-}
-
-template <class T>
-inline Register XOR(const Register& left, const Register& right)
-{
-	Register res(T::new_reg());
+	T res(T::new_reg());
 	XOR<T>(res, left, right);
 	return res;
 }
 
 template <class T>
-inline void AND(Register& res, const Register& left, const Register& right)
+inline void AND(T& res, const T& left, const T& right)
 {
 #ifdef KEY_SIGNAL
 #ifdef DEBUG_REGS
@@ -49,9 +39,9 @@ inline void AND(Register& res, const Register& left, const Register& right)
 }
 
 template <class T>
-inline Register AND(const Register& left, const Register& right)
+inline T AND(const T& left, const T& right)
 {
-    Register res = T::new_reg();
+    T res = T::new_reg();
 	AND<T>(res, left, right);
 	return res;
 }
@@ -60,30 +50,20 @@ template<class T>
 inline Secret<T> GC::Secret<T>::operator+(const Secret<T> x) const
 {
     Secret<T> res;
-    res.xor_(max(registers.size(), x.registers.size()), *this, x);
-    return res;
-}
-
-template <class T>
-MAYBE_INLINE void Secret<T>::xor_(int n, const Secret<T>& x, const Secret<T>& y)
-{
-    int min_n = min((size_t)n, min(x.registers.size(), y.registers.size()));
-    resize_regs(min_n);
-    for (int i = 0; i < min_n; i++)
-    {
-        XOR<T>(registers[i], x.get_reg(i), y.get_reg(i));
-    }
-
+    int min_n = min(registers.size(), x.registers.size());
+    int n = max(registers.size(), x.registers.size());
+    res.xor_(min_n, *this, x);
     if (min_n < n)
     {
-        const vector<Register>* more_regs;
-        if (y.registers.size() < x.registers.size())
+        const vector<T>* more_regs;
+        if (registers.size() < x.registers.size())
             more_regs = &x.registers;
         else
-            more_regs = &y.registers;
-        registers.insert(registers.end(), more_regs->begin() + min_n,
+            more_regs = &registers;
+        res.registers.insert(res.registers.end(), more_regs->begin() + min_n,
                 more_regs->begin() + min((size_t)n, more_regs->size()));
     }
+    return res;
 }
 
 template <class T>

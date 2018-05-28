@@ -33,11 +33,16 @@
 using namespace std;
 
 class bigint;
+class FlexBuffer;
 
 class octetStream
 {
+  friend class FlexBuffer;
+
   size_t len,mxlen,ptr;  // len is the "write head", ptr is the "read head"
   octet *data;
+
+  void reset();
 
   public:
 
@@ -46,10 +51,10 @@ class octetStream
   void clear();
 
   void assign(const octetStream& os);
-  void swap(octetStream& os);
 
   octetStream() : len(0), mxlen(0), ptr(0), data(0) {}
   octetStream(size_t maxlen);
+  octetStream(FlexBuffer& buffer);
   octetStream(const octetStream& os);
   octetStream& operator=(const octetStream& os)
     { if (this!=&os) { assign(os); }

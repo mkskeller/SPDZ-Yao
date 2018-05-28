@@ -20,8 +20,6 @@ using namespace std;
 
 #define LOOPBACK_STR "LOOPBACK"
 
-void fill_random(void* buffer, unsigned int length);
-
 class SendBuffer;
 
 void fill_message_type(void* buffer, MSG_TYPE type);

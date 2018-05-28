@@ -95,13 +95,6 @@ void CommonParty::next_gate(GarbledGate& gate)
     gate.init_inputs(gate_counter2, _N);
 }
 
-void CommonParty::input(Register& reg, party_id_t from)
-{
-    (void)reg;
-    (void)from;
-    throw not_implemented();
-}
-
 SendBuffer& CommonParty::get_buffer(MSG_TYPE type)
 {
 	SendBuffer& buffer = buffers[type];

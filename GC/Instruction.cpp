@@ -19,6 +19,9 @@
 
 #include "GC/Instruction_inline.h"
 
+#include "Yao/YaoGarbleWire.h"
+#include "Yao/YaoEvalWire.h"
+
 namespace GC
 {
 
@@ -78,6 +81,7 @@ template<class T>
 int GC::Instruction<T>::get_max_reg(int reg_type) const
 {
     int skip;
+    int offset = 0;
     switch (opcode)
     {
     case LDMSD:
@@ -88,13 +92,22 @@ int GC::Instruction<T>::get_max_reg(int reg_type) const
     case STMSDI:
         skip = 2;
         break;
+    case ANDRS:
+    case XORS:
+        skip = 4;
+        offset = 1;
+        break;
+    case INPUTB:
+        skip = 3;
+        offset = 2;
+        break;
     default:
         return BaseInstruction::get_max_reg(reg_type);
     }
 
     int m = 0;
     if (reg_type == SBIT)
-        for (size_t i = 0; i < start.size(); i += skip)
+        for (size_t i = offset; i < start.size(); i += skip)
             m = max(m, start[i] + 1);
     return m;
 }
@@ -192,7 +205,12 @@ void Instruction<T>::parse(istream& s, int pos)
         case STMSDCI:
         case XORS:
         case ANDRS:
+        case INPUTB:
             get_vector(get_int(s), start, s);
+            break;
+        case PRINTREGSIGNED:
+            n = get_int(s);
+            get_ints(r, s, 1);
             break;
         default:
             ostringstream os;
@@ -224,5 +242,7 @@ template class Instruction< Secret<PRFRegister> >;
 template class Instruction< Secret<EvalRegister> >;
 template class Instruction< Secret<GarbleRegister> >;
 template class Instruction< Secret<RandomRegister> >;
+template class Instruction< Secret<YaoGarbleWire> >;
+template class Instruction< Secret<YaoEvalWire> >;
 
 } /* namespace GC */

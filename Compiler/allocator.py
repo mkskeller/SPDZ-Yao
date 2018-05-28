@@ -164,6 +164,10 @@ class Merger:
     def do_merge(self, merges_iter):
         """ Merge an iterable of nodes in G, returning the number of merged
         instructions and the index of the merged instruction. """
+        # sort merges, necessary for inputb
+        merge = list(merges_iter)
+        merge.sort()
+        merges_iter = iter(merge)
         instructions = self.instructions
         mergecount = 0
         try:

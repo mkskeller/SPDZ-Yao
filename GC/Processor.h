@@ -27,9 +27,12 @@ template <class T>
 class Processor : public ::ProcessorBase
 {
     static Processor<T>* singleton;
+
 public:
     static Processor<T>& s();
     static int get_PC();
+
+    static int check_args(const vector<int>& args, int n);
 
     Machine<T>& machine;
 
@@ -39,6 +42,8 @@ public:
     // rough measure for the memory usage
     size_t complexity;
 
+    ifstream input_file;
+
     Memory<T> S;
     Memory<Clear> C;
     Memory<Integer> I;
@@ -47,6 +52,7 @@ public:
     ~Processor();
 
     void reset(const Program<T>& program);
+    void open_input_file(const string& name);
 
     void bitcoms(T& x, const vector<int>& regs) { x.bitcom(S, regs); }
     void bitdecs(const vector<int>& regs, const T& x) { x.bitdec(S, regs); }
@@ -64,8 +70,11 @@ public:
     void xors(const vector<int>& args);
     void andrs(const vector<int>& args);
 
+    void input(const vector<int>& args);
+
     void print_reg(int reg, int n);
     void print_reg_plain(Clear& value);
+    void print_reg_signed(unsigned n_bits, Clear& value);
     void print_chr(int n);
     void print_str(int n);
 };
