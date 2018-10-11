@@ -1,4 +1,4 @@
-(C) 2018 University of Bristol, Bar-Ilan University. See License.txt
+*Note:* [MP-SPDZ](https://github.com/n1analytics/MP-SPDZ) includes additional functionality such as private inputs.
 
 This repository contains code to run computation with Yao's garbled circuits optimized for AES-NI by [Bellare et al.](https://eprint.iacr.org/2013/426).
 
